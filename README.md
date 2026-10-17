@@ -22,9 +22,13 @@
 ## التحميل
 
 - **APK للأندرويد:** من صفحة [Releases](../../releases/tag/apk-latest) نزّل `VoceItaliana.apk`.
-- **نسخة الويب (أي موبايل حتى آيفون):** GitHub Pages للريبو — افتحها من Chrome/Safari واختار "Add to Home screen".
+  بيتبني أوتوماتيك بـ GitHub Actions مع كل push.
 
-الاتنين بيتبنوا أوتوماتيك بـ GitHub Actions مع كل push.
+## التصميم
+
+الواجهة ماشية على نظام **MANHWA (زجاج ونيون)**: خلفية سودا عليها نور أحمر وبقع ضوء، كروت زجاج بحافة نيون،
+وأيقونات Material Symbols Rounded (متضمّنة جوه التطبيق عشان تشتغل أوفلاين). ألوان الحالة ليها معنى ثابت:
+Amber = مستني، Ember = شغال، Mint = تمام، Crimson = خطأ.
 
 ## التطوير
 

@@ -27,7 +27,8 @@
     "@capacitor/android": "^8.5.3",
     "@capacitor/core": "^8.5.3",
     "@capacitor/share": "^8.0.3",
-    "@huggingface/transformers": "^4.3.1"
+    "@huggingface/transformers": "^4.3.1",
+    "material-symbols": "^0.48.0"
   },
   "private": true,
   "type": "module"

@@ -3,63 +3,91 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#030304" />
     <title>Voce Italiana</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <img src="icon.svg" alt="" width="44" height="44" />
-        <div>
-          <h1>Voce Italiana</h1>
-          <p class="sub">تحويل الصوت الإيطالي إلى نص — يشتغل على الموبايل بدون إنترنت بعد أول تحميل</p>
-        </div>
-      </header>
+    <div class="backdrop" aria-hidden="true"></div>
 
-      <section class="card">
-        <label class="drop" id="drop">
+    <header class="topbar">
+      <span class="icon-orb"><span class="msr">graphic_eq</span></span>
+      <div class="topbar-text">
+        <h1 class="title">Voce Italiana</h1>
+        <p class="subtitle">استخراج الكلام الإيطالي من أي ملف صوتي</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="glass accent">
+        <div class="card-head">
+          <span class="glow-icon" id="fileIcon" style="--c: var(--amber)"><span class="msr">audio_file</span></span>
+          <div>
+            <h2>الملف الصوتي</h2>
+            <p class="dim" id="fileLabel">mp3 · m4a · wav · opus · ogg · mp4</p>
+          </div>
+        </div>
+
+        <label class="drop">
           <input type="file" id="file" accept="audio/*,video/*,.mp3,.wav,.m4a,.ogg,.opus,.aac,.flac,.webm,.mp4" />
-          <span class="drop-icon">🎙️</span>
-          <span id="fileLabel">اختار ملف صوتي (mp3, m4a, wav, opus, ogg…)</span>
+          <span class="msr drop-icon">upload_file</span>
+          <span>اختار ملف من الموبايل</span>
         </label>
         <audio id="player" controls hidden></audio>
 
-        <label class="field">
-          <span>الموديل</span>
-          <select id="model">
-            <option value="base">Whisper Base — سريع (~80MB)</option>
-            <option value="small" selected>Whisper Small — دقة عالية (~250MB)</option>
-            <option value="turbo">Whisper Large v3 Turbo — الأدق، تقيل (~600MB+)</option>
-          </select>
-        </label>
-
-        <button id="go" disabled>ابدأ استخراج الكلام الإيطالي</button>
-
-        <div id="status" class="status" hidden>
-          <div class="bar"><div id="barFill"></div></div>
-          <p id="statusText"></p>
+        <div class="section-title">
+          <i></i>
+          <div>
+            <p class="section-sub">Whisper</p>
+            <h3>الموديل</h3>
+          </div>
         </div>
+        <div class="chips" id="models" role="radiogroup">
+          <button class="chip" data-model="base" role="radio">Base · سريع</button>
+          <button class="chip selected" data-model="small" role="radio">Small · دقيق</button>
+          <button class="chip" data-model="turbo" role="radio">Turbo · الأدق</button>
+        </div>
+        <p class="dim small" id="modelHint"></p>
+
+        <button class="btn-neon" id="go" disabled>
+          <span class="msr">play_arrow</span>ابدأ استخراج الكلام
+        </button>
       </section>
 
-      <section class="card" id="resultCard" hidden>
-        <div class="result-head">
-          <h2>النص (Italiano)</h2>
-          <label class="toggle"><input type="checkbox" id="showTs" /> توقيتات</label>
+      <section class="glass" id="statusCard" hidden>
+        <div class="card-head">
+          <span class="glow-icon" id="statusIcon"><span class="msr" id="statusSymbol">hourglass_top</span></span>
+          <div class="grow">
+            <h2 id="statusTitle"></h2>
+            <p class="dim" id="statusText"></p>
+          </div>
+        </div>
+        <div class="glow-bar"><i id="barFill"></i></div>
+      </section>
+
+      <section class="glass" id="resultCard" hidden>
+        <div class="section-title">
+          <i></i>
+          <div class="grow">
+            <p class="section-sub">Italiano</p>
+            <h3>النص</h3>
+          </div>
+          <button class="chip" id="showTs" aria-pressed="false"><span class="msr">schedule</span>توقيتات</button>
         </div>
         <div id="result" class="result" dir="ltr" lang="it" contenteditable="true" spellcheck="true"></div>
         <div class="actions">
-          <button id="copy" class="secondary">نسخ</button>
-          <button id="share" class="secondary">مشاركة</button>
-          <button id="txt" class="secondary">تحميل TXT</button>
-          <button id="srt" class="secondary">تحميل SRT</button>
+          <button class="btn-ghost" id="copy"><span class="msr">content_copy</span><span>نسخ</span></button>
+          <button class="btn-ghost" id="share"><span class="msr">share</span><span>مشاركة</span></button>
+          <button class="btn-ghost" id="txt"><span class="msr">description</span><span>TXT</span></button>
+          <button class="btn-ghost" id="srt"><span class="msr">subtitles</span><span>SRT</span></button>
         </div>
       </section>
 
-      <footer>
-        كل المعالجة بتتم على جهازك — الملف مش بيترفع على أي سيرفر. الموديلات: OpenAI Whisper (مفتوح المصدر) عبر Transformers.js.
+      <footer class="dim small">
+        <span class="msr">lock</span>
+        المعالجة كلها على جهازك والملف مش بيترفع على أي سيرفر. أول مرة بس محتاج إنترنت لتحميل الموديل.
       </footer>
     </main>
     <script type="module" src="/src/main.js"></script>
