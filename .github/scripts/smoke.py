@@ -23,14 +23,20 @@ def nodes():
         yield text, ((x1 + x2) // 2, (y1 + y2) // 2)
 
 
-def tap(fragment, swipes=4):
+def swipe_up():
+    m = re.search(r"(\d+)x(\d+)", adb("shell", "wm", "size", check=False))
+    w, h = (int(m.group(1)), int(m.group(2))) if m else (320, 640)
+    adb("shell", "input", "swipe", str(w // 2), str(h * 3 // 4), str(w // 2), str(h // 4), "400")
+
+
+def tap(fragment, swipes=6):
     for _ in range(swipes + 1):
         for text, (x, y) in nodes():
             if fragment in text:
                 print(f"tap '{text}' at {x},{y}")
                 adb("shell", "input", "tap", str(x), str(y))
                 return
-        adb("shell", "input", "swipe", "500", "1500", "500", "700", "300")
+        swipe_up()
         time.sleep(1)
     raise SystemExit(f"'{fragment}' not found on screen:\n" + "\n".join(t for t, _ in nodes()))
 
