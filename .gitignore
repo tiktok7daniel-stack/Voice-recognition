@@ -6,3 +6,4 @@ local.properties
 .kotlin/
 app/libs/*.aar
 app/src/main/assets/silero_vad.onnx
+*.apk
