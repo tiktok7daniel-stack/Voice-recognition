@@ -7,7 +7,7 @@ import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import java.io.File
 
 /**
- * Free, open models packaged for sherpa-onnx (k2-fsa) and hosted on Hugging Face.
+ * Free, open models packaged for sherpa-onnx (k2-fsa).
  * Every model here handles Italian; the ones that accept a language hint are forced to "it".
  */
 enum class AsrModel(
@@ -16,6 +16,8 @@ enum class AsrModel(
     val sizeLabel: String,
     val hfRepo: String,
     val files: List<String>,
+    // Hugging Face by default; Cohere is only mirrored on ModelScope.
+    private val baseUrl: String = "https://huggingface.co/$hfRepo/resolve/main",
 ) {
     Parakeet(
         title = "Parakeet v3",
@@ -27,7 +29,7 @@ enum class AsrModel(
     WhisperTurbo(
         title = "Whisper Turbo",
         tagline = "OpenAI large-v3-turbo · متثبت على الإيطالي",
-        sizeLabel = "≈ 1 GB",
+        sizeLabel = "≈ 1.04 GB",
         hfRepo = "csukuangfj/sherpa-onnx-whisper-turbo",
         files = listOf("turbo-encoder.int8.onnx", "turbo-decoder.int8.onnx", "turbo-tokens.txt"),
     ),
@@ -37,17 +39,18 @@ enum class AsrModel(
         sizeLabel = "≈ 2.1 GB",
         hfRepo = "csukuangfj/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01",
         files = listOf("encoder.int8.onnx", "encoder.int8.onnx.data", "decoder.int8.onnx", "tokens.txt"),
+        baseUrl = "https://modelscope.cn/models/csukuangfj/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/resolve/master",
     ),
     WhisperSmall(
         title = "Whisper Small",
         tagline = "خفيف للموبايلات الضعيفة · متثبت على الإيطالي",
-        sizeLabel = "≈ 360 MB",
+        sizeLabel = "≈ 375 MB",
         hfRepo = "csukuangfj/sherpa-onnx-whisper-small",
         files = listOf("small-encoder.int8.onnx", "small-decoder.int8.onnx", "small-tokens.txt"),
     ),
     ;
 
-    fun url(file: String) = "https://huggingface.co/$hfRepo/resolve/main/$file"
+    fun url(file: String) = "$baseUrl/$file"
 
     fun dir(root: File) = File(root, name)
 

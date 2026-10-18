@@ -39,14 +39,18 @@ jobs:
           import re, subprocess, sys
           src = open("app/src/main/java/com/tiktok7daniel/voceitaliana/asr/Models.kt").read()
           bad = 0
-          for repo, files in re.findall(r'hfRepo = "([^"]+)",\s*files = listOf\(([^)]*)\)', src):
+          for block in re.findall(r'hfRepo = "[^"]+",.*?\n    \)', src, re.S):
+              repo = re.search(r'hfRepo = "([^"]+)"', block).group(1)
+              files = re.search(r'files = listOf\(([^)]*)\)', block).group(1)
+              m = re.search(r'baseUrl = "([^"]+)"', block)
+              base = m.group(1) if m else f"https://huggingface.co/{repo}/resolve/main"
               total = 0
               for f in re.findall(r'"([^"]+)"', files):
-                  url = f"https://huggingface.co/{repo}/resolve/main/{f}"
+                  url = f"{base}/{f}"
                   out = subprocess.run(["curl", "-sIL", url], capture_output=True, text=True).stdout
                   codes = re.findall(r"^HTTP/\S+ (\d+)", out, re.M)
                   sizes = re.findall(r"^(?:content-length|x-linked-size): (\d+)", out, re.M | re.I)
-                  ok = codes and codes[-1] == "200"
+                  ok = bool(codes) and codes[-1] == "200"
                   size = max(map(int, sizes)) if sizes else 0
                   total += size
                   print(("OK " if ok else "MISSING ") + url + f"  {size/1e6:.0f} MB")
