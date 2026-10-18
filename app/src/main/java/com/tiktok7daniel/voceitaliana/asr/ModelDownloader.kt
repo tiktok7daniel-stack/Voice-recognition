@@ -32,10 +32,34 @@ object ModelDownloader {
             }
             val part = File(dir, "$name.part")
             val base = done
-            fetch(model.url(name), part) { fileBytes -> onProgress(base + fileBytes, total) }
+            fetch(model.url(name), part, sizes[i]) { fileBytes -> onProgress(base + fileBytes, total) }
+            if (looksLikeHtml(part)) {
+                // A mirror answered with a web page instead of the file: never keep it as a model.
+                part.delete()
+                throw IOException("$name: the server sent a web page instead of the model file")
+            }
+            if (sizes[i] > 0 && part.length() != sizes[i]) {
+                throw IOException("$name: ${part.length()} of ${sizes[i]} bytes")
+            }
             if (!part.renameTo(target)) throw IOException("Cannot save $name")
             done = base + (if (sizes[i] > 0) sizes[i] else target.length())
         }
+    }
+
+    /** True when a download of [model] was started and left unfinished (a .part file is on disk). */
+    fun hasPartial(model: AsrModel, root: File) =
+        model.dir(root).listFiles()?.any { it.name.endsWith(".part") } == true
+
+    /**
+     * Model files are binary; an HTML/JSON page saved under a model name (an error page or a
+     * login wall from a mirror) is what makes a "downloaded" model fail to load.
+     */
+    fun looksLikeHtml(f: File): Boolean {
+        if (!f.isFile || f.length() == 0L || f.name.endsWith(".txt") || f.name.endsWith(".txt.part")) return false
+        val head = ByteArray(64)
+        val n = f.inputStream().use { it.read(head) }
+        val text = String(head, 0, maxOf(n, 0), Charsets.ISO_8859_1).trimStart().lowercase()
+        return text.startsWith("<!doctype") || text.startsWith("<html") || text.startsWith("{\"")
     }
 
     fun delete(model: AsrModel, root: File) {
@@ -76,10 +100,24 @@ object ModelDownloader {
         -1L
     }
 
-    private suspend fun fetch(url: String, part: File, onBytes: (Long) -> Unit) {
+    private suspend fun fetch(url: String, part: File, expected: Long, onBytes: (Long) -> Unit) {
         var have = if (part.isFile) part.length() else 0L
+        if (expected > 0 && have == expected) {
+            onBytes(have) // already fully downloaded before the app was closed
+            return
+        }
+        if (expected > 0 && have > expected) {
+            part.delete()
+            have = 0
+        }
         val c = open(url, from = have)
         val code = c.responseCode
+        if (code == 416 && have > 0) {
+            // "Range not satisfiable": the part file is not a prefix of the file; start over.
+            c.disconnect()
+            part.delete()
+            return fetch(url, part, expected, onBytes)
+        }
         if (code !in 200..299) throw IOException("HTTP $code")
         if (code == 200) have = 0 // server ignored Range: restart from scratch
         c.inputStream.use { input ->

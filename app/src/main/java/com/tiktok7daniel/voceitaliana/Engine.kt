@@ -19,9 +19,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 sealed interface Phase {
     data object Idle : Phase
@@ -70,7 +72,34 @@ class Engine(private val app: Application) {
     }
 
     private fun refreshInstalled() {
-        AsrModel.entries.forEach { installed[it] = it.isInstalled(modelsRoot) }
+        AsrModel.entries.forEach { m ->
+            // Drop files an older build saved from an error page, so they get downloaded again.
+            m.files.map { File(m.dir(modelsRoot), it) }.filter { ModelDownloader.looksLikeHtml(it) }.forEach { it.delete() }
+            installed[m] = m.isInstalled(modelsRoot)
+        }
+    }
+
+    /**
+     * Picks an unfinished download back up (the phone may have killed the app, or the network
+     * dropped) instead of making the user press "download" again. Called when the screen opens,
+     * because Android only lets the foreground service start from the foreground.
+     */
+    fun resumePendingDownload() {
+        if (busy) return
+        val saved = prefs.getString("downloading", null)
+        val m = if (saved != null) {
+            // "" means the user stopped the last download on purpose.
+            AsrModel.entries.firstOrNull { it.name == saved } ?: return
+        } else {
+            // Builds before this one did not record the download; fall back to leftover .part files.
+            AsrModel.entries.firstOrNull { installed[it] != true && ModelDownloader.hasPartial(it, modelsRoot) } ?: return
+        }
+        if (installed[m] == true) {
+            prefs.edit().putString("downloading", "").apply()
+            return
+        }
+        select(m)
+        download()
     }
 
     fun select(m: AsrModel) {
@@ -113,18 +142,36 @@ class Engine(private val app: Application) {
         if (busy) return
         val m = model
         phase = Phase.Downloading(m, 0, -1)
+        prefs.edit().putString("downloading", m.name).apply()
         WorkService.start(app)
         job = scope.launch {
             try {
-                ModelDownloader.download(m, modelsRoot) { done, total ->
-                    scope.launch { if (phase is Phase.Downloading) phase = Phase.Downloading(m, done, total) }
+                // Mobile connections drop often on a 1 GB file: retry by itself, resuming each time.
+                var attempt = 0
+                while (true) {
+                    try {
+                        ModelDownloader.download(m, modelsRoot) { done, total ->
+                            scope.launch { if (phase is Phase.Downloading) phase = Phase.Downloading(m, done, total) }
+                        }
+                        break
+                    } catch (e: IOException) {
+                        if (++attempt >= 6) throw e
+                        delay(3_000L * attempt)
+                    }
                 }
                 refreshInstalled()
-                phase = Phase.Idle
+                prefs.edit().putString("downloading", "").apply()
+                phase = if (installed[m] == true) {
+                    Phase.Idle
+                } else {
+                    Phase.Failed("الموديل ناقص", "في ملف ماتحمّلش صح — دوس تحميل تاني")
+                }
             } catch (e: CancellationException) {
+                // Stopped by the user: don't resume it on the next launch.
+                prefs.edit().putString("downloading", "").apply()
                 phase = Phase.Idle
             } catch (e: Exception) {
-                phase = Phase.Failed("التحميل وقف", "اتأكد من النت وجرب تاني — هيكمّل من مكان ما وقف. (${e.message})")
+                phase = Phase.Failed("التحميل وقف", "اتأكد من النت — هيكمّل لوحده من مكان ما وقف أول ما تفتح البرنامج. (${e.message})")
             }
         }
     }

@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
         ) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        vm.resumePendingDownload()
         setContent {
             VoceTheme {
                 MainScreen(vm)
