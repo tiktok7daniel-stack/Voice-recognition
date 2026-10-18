@@ -1,8 +1,0 @@
-{
-  "appId": "com.tiktok7daniel.italianvoice",
-  "appName": "Voce Italiana",
-  "webDir": "dist",
-  "android": {
-    "allowMixedContent": false
-  }
-}

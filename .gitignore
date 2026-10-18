@@ -1,4 +1,8 @@
-node_modules/
-dist/
-android/
-*.log
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+app/libs/*.aar
+app/src/main/assets/silero_vad.onnx
