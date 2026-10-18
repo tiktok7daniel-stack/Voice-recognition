@@ -63,7 +63,7 @@ print("screen:", screen_text())
 
 tap("Whisper Small")
 time.sleep(1)
-tap("تحميل")
+tap("تحميل Whisper Small")
 
 for i in range(12):
     time.sleep(5)

@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +35,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -70,6 +76,7 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.tiktok7daniel.voceitaliana.Engine
 import com.tiktok7daniel.voceitaliana.Phase
 import com.tiktok7daniel.voceitaliana.VoceApp
@@ -79,7 +86,24 @@ private val CardShape = RoundedCornerShape(26.dp)
 
 @Composable
 fun MainScreen(vm: Engine) {
+    var page by remember { mutableStateOf<Page>(Page.Home) }
+    val lib = vm.library
+    when (val p = page) {
+        Page.Home -> HomePage(vm, onLibrary = { page = Page.Groups }, onSaved = { page = Page.OneGroup(it) })
+        Page.Groups -> GroupsPage(lib, onBack = { page = Page.Home }, onOpen = { page = Page.OneGroup(it.id) })
+        is Page.OneGroup -> GroupPage(lib, p.groupId, onBack = { page = Page.Groups }, onOpen = { page = Page.OneNote(it.groupId, it.id) })
+        is Page.OneNote -> NotePage(
+            lib, p.groupId, p.noteId,
+            onBack = { page = Page.OneGroup(p.groupId) },
+            onMoved = { page = Page.OneNote(it.groupId, it.id) },
+        )
+    }
+}
+
+@Composable
+private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: String) -> Unit) {
     val ctx = LocalContext.current
+    var saving by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::pick) }
     val saveTxt = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         uri?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(vm.text.toByteArray()) } }
@@ -91,12 +115,29 @@ fun MainScreen(vm: Engine) {
     val crashFile = remember { (ctx.applicationContext as VoceApp).crashFile }
     var crash by remember { mutableStateOf(crashFile.takeIf { it.isFile }?.readText()) }
 
+    // Re-checked whenever the user comes back from the system battery screen.
+    var backgroundAllowed by remember { mutableStateOf(true) }
+    LifecycleResumeEffect(Unit) {
+        backgroundAllowed = isBackgroundAllowed(ctx)
+        onPauseOrDispose {}
+    }
+
+    if (saving) {
+        SaveToGroupDialog(vm.library, vm.baseName(), onDismiss = { saving = false }) { group, title ->
+            saving = false
+            vm.library.addNote(group.id, title, vm.text, vm.file?.name.orEmpty())
+            Toast.makeText(ctx, "اتحفظ في \"${group.name}\"", Toast.LENGTH_SHORT).show()
+            onSaved(group.id)
+        }
+    }
+
     GlassBackdrop {
         Column(Modifier.fillMaxSize()) {
             TopBar(
                 title = "Voce Italiana",
                 subtitle = "استخراج الكلام الإيطالي من أي ملف صوتي",
                 leading = { IconOrb(Icons.Rounded.GraphicEq, active = true) },
+                actions = { IconOrb(Icons.Rounded.Folder, onClick = onLibrary) },
             )
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -104,6 +145,7 @@ fun MainScreen(vm: Engine) {
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 crash?.let { report -> item { CrashCard(report, onCopy = { copy(ctx, report) }, onDismiss = { crash = null; crashFile.delete() }) } }
+                if (!backgroundAllowed) item { BackgroundCard { askBackground(ctx) } }
                 item { FileCard(vm) { picker.launch(arrayOf("audio/*", "video/*")) } }
                 item { ModelCard(vm) }
                 if (vm.phase !is Phase.Idle) item { StatusCard(vm) }
@@ -115,6 +157,7 @@ fun MainScreen(vm: Engine) {
                             onShare = { share(ctx, vm.text) },
                             onTxt = { saveTxt.launch("${vm.baseName()}.txt") },
                             onSrt = { saveSrt.launch("${vm.baseName()}.srt") },
+                            onSaveToGroup = { saving = true },
                         )
                     }
                 }
@@ -299,7 +342,7 @@ private fun IndeterminateGlowBar() {
 }
 
 @Composable
-private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTxt: () -> Unit, onSrt: () -> Unit) {
+private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTxt: () -> Unit, onSrt: () -> Unit, onSaveToGroup: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().glass(CardShape, accent = true, alpha = 0.45f).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -335,6 +378,45 @@ private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTx
             GhostButton("حفظ TXT", Modifier.weight(1f), Icons.Rounded.Description, enabled && !vm.busy, onTxt)
             GhostButton("ترجمة SRT", Modifier.weight(1f), Icons.Rounded.Subtitles, enabled && !vm.busy, onSrt)
         }
+        NeonButton("حفظ في مجموعة", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled && !vm.busy, onSaveToGroup)
+    }
+}
+
+/**
+ * Phones (Xiaomi, Samsung, Oppo…) kill background apps to save battery even while they show a
+ * notification. Being exempt from battery optimisation is what keeps long jobs alive.
+ */
+@Composable
+private fun BackgroundCard(onAllow: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().glass(CardShape, alpha = 0.45f).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GlowIcon(Icons.Rounded.BatteryAlert, Accent.Amber)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("خليه يشتغل في الخلفية", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+                Text(
+                    "الموبايل ممكن يقفل البرنامج عشان يوفّر البطارية. اسمح له مرة واحدة والتحميل والاستخراج هيكمّلوا حتى لو قفلت الشاشة",
+                    style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f),
+                )
+            }
+        }
+        NeonButton("اسمح بالشغل في الخلفية", Modifier.fillMaxWidth(), Icons.Rounded.BatteryAlert, onClick = onAllow)
+    }
+}
+
+private fun isBackgroundAllowed(ctx: Context): Boolean =
+    (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+
+private fun askBackground(ctx: Context) {
+    val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
+    try {
+        ctx.startActivity(direct)
+    } catch (e: Exception) {
+        // Some phones hide that dialog; the full list still lets the user pick the app.
+        runCatching { ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
     }
 }
 
@@ -354,7 +436,7 @@ private fun Footer() {
     }
 }
 
-private fun copy(ctx: Context, text: String) {
+internal fun copy(ctx: Context, text: String) {
     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("Voce Italiana", text))
     Toast.makeText(ctx, "اتنسخ", Toast.LENGTH_SHORT).show()
@@ -387,7 +469,7 @@ private fun CrashCard(report: String, onCopy: () -> Unit, onDismiss: () -> Unit)
     }
 }
 
-private fun share(ctx: Context, text: String) {
+internal fun share(ctx: Context, text: String) {
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, text)

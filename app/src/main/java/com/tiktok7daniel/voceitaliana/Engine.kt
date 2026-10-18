@@ -14,6 +14,7 @@ import com.tiktok7daniel.voceitaliana.asr.AudioDecoder
 import com.tiktok7daniel.voceitaliana.asr.ModelDownloader
 import com.tiktok7daniel.voceitaliana.asr.Segment
 import com.tiktok7daniel.voceitaliana.asr.Transcriber
+import com.tiktok7daniel.voceitaliana.library.Library
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,7 @@ class Engine(private val app: Application) {
     private val inbox = File(app.filesDir, "inbox")
     private val lastResult = File(app.filesDir, "last.tsv")
     private val transcriber = Transcriber(app, modelsRoot)
+    val library = Library(File(app.filesDir, "library"))
     private var job: Job? = null
 
     var model by mutableStateOf(
