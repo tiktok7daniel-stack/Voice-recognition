@@ -7,6 +7,11 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -273,12 +278,11 @@ private fun StatusCard(vm: MainViewModel) {
 
 @Composable
 private fun IndeterminateGlowBar() {
-    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "bar")
+    val t = rememberInfiniteTransition(label = "bar")
     val v = t.animateFloat(
-        0.05f, 1f,
-        androidx.compose.animation.core.infiniteRepeatable(
-            androidx.compose.animation.core.tween(1400), androidx.compose.animation.core.RepeatMode.Reverse,
-        ),
+        initialValue = 0.05f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
         label = "barValue",
     )
     GlowBar(v.value)
