@@ -34,7 +34,14 @@ sealed interface Phase {
     data class Working(val progress: Float) : Phase
     data class Done(val seconds: Float) : Phase
     data class Failed(val title: String, val detail: String) : Phase
+
+    /** Several files transcribed one after another; [index] is 0-based. */
+    data class Batch(val index: Int, val total: Int, val name: String, val progress: Float) : Phase
+    data class BatchDone(val saved: Int, val failed: Int) : Phase
 }
+
+/** One file of a multi-file job and how it went. */
+data class BatchItem(val name: String, val state: String, val ok: Boolean? = null)
 
 data class PickedFile(val uri: Uri, val name: String, val durationMs: Long)
 
@@ -66,7 +73,11 @@ class Engine(private val app: Application) {
     var showTimestamps by mutableStateOf(false)
     var text by mutableStateOf("")
 
-    val busy get() = phase is Phase.Importing || phase is Phase.Downloading || phase is Phase.Loading || phase is Phase.Working
+    val busy get() = phase is Phase.Importing || phase is Phase.Downloading || phase is Phase.Loading || phase is Phase.Working ||
+        phase is Phase.Batch
+
+    /** Files of the current/last multi-file job, shown as a checklist. */
+    val batch = mutableStateListOf<BatchItem>()
 
     init {
         refreshInstalled()
@@ -228,6 +239,96 @@ class Engine(private val app: Application) {
         job?.cancel()
     }
 
+    /**
+     * Transcribes several files back to back and saves each transcript straight into the given
+     * group/section, named after its file. One at a time on purpose: a phone has the RAM and
+     * cores for one model run, and two in parallel would each go at half speed anyway.
+     */
+    fun startBatch(uris: List<Uri>, groupId: String, sectionId: String) {
+        if (busy || uris.isEmpty()) return
+        val m = model
+        if (installed[m] != true) {
+            phase = Phase.Failed("حمّل الموديل الأول", "دوس تحميل ${m.title} وبعدين اختار الملفات تاني")
+            return
+        }
+        val dir = File(app.filesDir, "batch")
+        batch.clear()
+        phase = Phase.Importing
+        WorkService.start(app)
+        job = scope.launch {
+            var saved = 0
+            var failed = 0
+            try {
+                // Copy first: the read grant from the file picker does not outlive the screen.
+                val files = withContext(Dispatchers.IO) {
+                    dir.deleteRecursively()
+                    dir.mkdirs()
+                    uris.mapIndexed { i, uri ->
+                        val name = displayName(uri)
+                        val copy = File(dir, "$i-${name.replace('/', '_')}")
+                        runCatching {
+                            app.contentResolver.openInputStream(uri)!!.use { input -> copy.outputStream().use { input.copyTo(it, 1 shl 20) } }
+                        }
+                        name to copy
+                    }
+                }
+                batch.addAll(files.map { BatchItem(it.first, "مستني") })
+                phase = Phase.Loading
+                withContext(Dispatchers.Default) { transcriber.load(m) }
+                files.forEachIndexed { i, (name, copy) ->
+                    phase = Phase.Batch(i, files.size, name, 0f)
+                    batch[i] = BatchItem(name, "شغال…")
+                    try {
+                        if (!copy.isFile || copy.length() == 0L) throw java.io.IOException("الملف ماتنسخش")
+                        val found = mutableListOf<Segment>()
+                        withContext(Dispatchers.Default) {
+                            transcriber.transcribe(
+                                Uri.fromFile(copy), m,
+                                onProgress = { p -> scope.launch { if (phase is Phase.Batch) phase = Phase.Batch(i, files.size, name, p) } },
+                                onSegment = { found.add(it) },
+                            )
+                        }
+                        val note = library.addNote(groupId, sectionId, name.substringBeforeLast('.').ifBlank { name }, paragraphs(found), name)
+                        if (note == null) throw java.io.IOException("المجموعة اتمسحت")
+                        batch[i] = BatchItem(name, "اتحفظ — ${found.size} جملة", ok = true)
+                        saved++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: OutOfMemoryError) {
+                        transcriber.release()
+                        batch[i] = BatchItem(name, "الرام مش كفاية — جرّب موديل أخف", ok = false)
+                        failed++
+                        withContext(Dispatchers.Default) { transcriber.load(m) }
+                    } catch (e: Exception) {
+                        batch[i] = BatchItem(name, "فشل: ${e.message ?: e.javaClass.simpleName}", ok = false)
+                        failed++
+                    } finally {
+                        copy.delete()
+                    }
+                }
+                phase = Phase.BatchDone(saved, failed)
+            } catch (e: CancellationException) {
+                batch.indices.forEach { if (batch[it].ok == null) batch[it] = batch[it].copy(state = "اتوقف") }
+                phase = if (saved > 0) Phase.BatchDone(saved, failed) else Phase.Idle
+            } catch (e: Exception) {
+                phase = Phase.Failed("حصل خطأ", e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    fun clearBatch() {
+        if (busy) return
+        batch.clear()
+        if (phase is Phase.BatchDone) phase = Phase.Idle
+    }
+
+    private fun displayName(uri: Uri): String =
+        runCatching {
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "audio"
+
     /** Brings back the last transcript after the app was closed and reopened. */
     private fun restoreLast() {
         if (!lastResult.isFile) return
@@ -258,7 +359,7 @@ class Engine(private val app: Application) {
         }
 
     /** Joins utterances into paragraphs, breaking where the speaker paused for a while. */
-    private fun paragraphs(): String {
+    private fun paragraphs(segments: List<Segment> = this.segments): String {
         val sb = StringBuilder()
         segments.forEachIndexed { i, s ->
             if (i > 0) sb.append(if (s.start - segments[i - 1].end > 1.5f) "\n\n" else " ")

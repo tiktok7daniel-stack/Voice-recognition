@@ -106,6 +106,8 @@ class WorkService : Service() {
         val (title, text) = when (phase) {
             is Phase.Done -> "خلصنا — النص جاهز" to "${engine.segments.size} جملة من ${engine.file?.name ?: "الملف"}"
             is Phase.Failed -> phase.title to phase.detail
+            is Phase.BatchDone -> "خلصنا ${phase.saved} ملف" to
+                (if (phase.failed > 0) "${phase.failed} ماخلصوش — " else "") + "اتحفظوا في المجموعة"
             else -> null to null
         }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -116,7 +118,7 @@ class WorkService : Service() {
                     .setSmallIcon(R.drawable.ic_stat_voice)
                     .setContentTitle(title)
                     .setContentText(text)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(engine.text.take(400).ifBlank { text }))
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(if (phase is Phase.Done) engine.text.take(400).ifBlank { text } else text))
                     .setContentIntent(openApp())
                     .setAutoCancel(true)
                     .build(),
@@ -151,6 +153,11 @@ class WorkService : Service() {
                 b.setContentTitle("بستخرج الكلام الإيطالي — ${(phase.progress * 100).toInt()}%")
                     .setContentText(engine.segments.lastOrNull()?.text ?: engine.file?.name)
                     .setProgress(1000, (phase.progress * 1000).toInt(), false)
+            }
+            is Phase.Batch -> {
+                b.setContentTitle("بستخرج ${phase.index + 1} من ${phase.total} — ${(phase.progress * 100).toInt()}%")
+                    .setContentText(phase.name)
+                    .setProgress(1000, ((phase.index + phase.progress) * 1000 / phase.total).toInt(), false)
             }
             else -> b.setContentTitle("بجهّز الموديل").setProgress(0, 0, true)
         }

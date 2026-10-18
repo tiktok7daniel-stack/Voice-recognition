@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -89,21 +90,40 @@ fun MainScreen(vm: Engine) {
     var page by remember { mutableStateOf<Page>(Page.Home) }
     val lib = vm.library
     when (val p = page) {
-        Page.Home -> HomePage(vm, onLibrary = { page = Page.Groups }, onSaved = { page = Page.OneGroup(it) })
+        Page.Home -> HomePage(vm, onLibrary = { page = Page.Groups }, onSaved = { g, sec -> page = if (sec.isEmpty()) Page.OneGroup(g) else Page.OneSection(g, sec) })
         Page.Groups -> GroupsPage(lib, onBack = { page = Page.Home }, onOpen = { page = Page.OneGroup(it.id) })
-        is Page.OneGroup -> GroupPage(lib, p.groupId, onBack = { page = Page.Groups }, onOpen = { page = Page.OneNote(it.groupId, it.id) })
+        is Page.OneGroup -> GroupPage(
+            lib, p.groupId,
+            onBack = { page = Page.Groups },
+            onSection = { page = Page.OneSection(p.groupId, it) },
+            onOpen = { page = Page.OneNote(it.groupId, it.id) },
+        )
+        is Page.OneSection -> SectionPage(
+            lib, p.groupId, p.sectionId,
+            onBack = { page = Page.OneGroup(p.groupId) },
+            onOpen = { page = Page.OneNote(it.groupId, it.id) },
+        )
         is Page.OneNote -> NotePage(
             lib, p.groupId, p.noteId,
-            onBack = { page = Page.OneGroup(p.groupId) },
+            // Back to wherever the note lives now (its section, or the group itself).
+            onBack = {
+                val section = lib.note(p.groupId, p.noteId)?.sectionId.orEmpty()
+                page = if (section.isNotEmpty()) Page.OneSection(p.groupId, section) else Page.OneGroup(p.groupId)
+            },
             onMoved = { page = Page.OneNote(it.groupId, it.id) },
         )
     }
 }
 
 @Composable
-private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: String) -> Unit) {
+private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: String, sectionId: String) -> Unit) {
     val ctx = LocalContext.current
     var saving by remember { mutableStateOf(false) }
+    // Files picked for a multi-file job, waiting for the user to choose where to save them.
+    var pendingBatch by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    val pickMany = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) pendingBatch = uris
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::pick) }
     val saveTxt = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         uri?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(vm.text.toByteArray()) } }
@@ -123,11 +143,21 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: Strin
     }
 
     if (saving) {
-        SaveToGroupDialog(vm.library, vm.baseName(), onDismiss = { saving = false }) { group, title ->
+        SaveToGroupDialog(vm.library, vm.baseName(), onDismiss = { saving = false }) { group, sectionId, title ->
             saving = false
-            vm.library.addNote(group.id, title, vm.text, vm.file?.name.orEmpty())
+            vm.library.addNote(group.id, sectionId, title, vm.text, vm.file?.name.orEmpty())
             Toast.makeText(ctx, "اتحفظ في \"${group.name}\"", Toast.LENGTH_SHORT).show()
-            onSaved(group.id)
+            onSaved(group.id, sectionId)
+        }
+    }
+
+    if (pendingBatch.isNotEmpty()) {
+        SaveToGroupDialog(
+            vm.library, null, onDismiss = { pendingBatch = emptyList() },
+            heading = "هحفظ ${pendingBatch.size} ملف فين؟",
+        ) { group, sectionId, _ ->
+            vm.startBatch(pendingBatch, group.id, sectionId)
+            pendingBatch = emptyList()
         }
     }
 
@@ -146,7 +176,14 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: Strin
             ) {
                 crash?.let { report -> item { CrashCard(report, onCopy = { copy(ctx, report) }, onDismiss = { crash = null; crashFile.delete() }) } }
                 if (!backgroundAllowed) item { BackgroundCard { askBackground(ctx) } }
-                item { FileCard(vm) { picker.launch(arrayOf("audio/*", "video/*")) } }
+                item {
+                    FileCard(
+                        vm,
+                        onPick = { picker.launch(arrayOf("audio/*", "video/*")) },
+                        onPickMany = { pickMany.launch(arrayOf("audio/*", "video/*")) },
+                    )
+                }
+                if (vm.batch.isNotEmpty()) item { BatchCard(vm, onOpen = onLibrary) }
                 item { ModelCard(vm) }
                 if (vm.phase !is Phase.Idle) item { StatusCard(vm) }
                 if (vm.segments.isNotEmpty() || vm.phase is Phase.Done) {
@@ -168,7 +205,7 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: Strin
 }
 
 @Composable
-private fun FileCard(vm: Engine, onPick: () -> Unit) {
+private fun FileCard(vm: Engine, onPick: () -> Unit, onPickMany: () -> Unit) {
     val f = vm.file
     Column(
         Modifier.fillMaxWidth().glass(CardShape, accent = true, alpha = 0.45f).padding(18.dp),
@@ -216,6 +253,47 @@ private fun FileCard(vm: Engine, onPick: () -> Unit) {
                 style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f),
             )
         }
+        GhostButton("كذا ملف مرة واحدة (تتحفظ في مجموعة)", Modifier.fillMaxWidth(), Icons.Rounded.LibraryAdd, enabled = !vm.busy, onClick = onPickMany)
+    }
+}
+
+/** Checklist of a multi-file job: each file and whether it was transcribed and saved. */
+@Composable
+private fun BatchCard(vm: Engine, onOpen: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().glass(CardShape, alpha = 0.45f).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SectionTitle("الملفات", subtitle = "${vm.batch.count { it.ok == true }} من ${vm.batch.size} اتحفظوا")
+        vm.batch.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    when (item.ok) {
+                        true -> Icons.Rounded.CheckCircle
+                        false -> Icons.Rounded.Error
+                        null -> Icons.Rounded.Schedule
+                    },
+                    null,
+                    tint = when (item.ok) {
+                        true -> Accent.Mint
+                        false -> Accent.Crimson
+                        null -> Color.White.copy(alpha = 0.5f)
+                    },
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(item.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(item.state, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f), maxLines = 2)
+                }
+            }
+        }
+        if (!vm.busy) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NeonButton("افتح المجموعات", Modifier.weight(1f), Icons.Rounded.Folder, onClick = onOpen)
+                GhostButton("تمام", Modifier.weight(1f), Icons.Rounded.Close, onClick = vm::clearBatch)
+            }
+        }
     }
 }
 
@@ -229,7 +307,7 @@ private fun ModelCard(vm: Engine) {
         SectionTitle("الموديل", subtitle = "مجاني ومفتوح المصدر · بيشتغل من غير نت")
         AsrModel.entries.forEach { m -> ModelRow(vm, m) }
         when {
-            vm.phase is Phase.Working || vm.phase is Phase.Loading || vm.phase is Phase.Downloading ->
+            vm.phase is Phase.Working || vm.phase is Phase.Loading || vm.phase is Phase.Downloading || vm.phase is Phase.Batch ->
                 GhostButton("إيقاف", Modifier.fillMaxWidth(), Icons.Rounded.Close, onClick = vm::cancel)
             !installed ->
                 NeonButton("تحميل ${vm.model.title} (${vm.model.sizeLabel})", Modifier.fillMaxWidth(), Icons.Rounded.Download, onClick = vm::download)
@@ -311,6 +389,14 @@ private fun StatusCard(vm: Engine) {
             "${vm.segments.size} جملة في ${Engine.clock(p.seconds)} — تقدر تعدّل النص", 1f,
         )
         is Phase.Failed -> S(Icons.Rounded.Error, Accent.Crimson, false, p.title, p.detail, null)
+        is Phase.Batch -> S(
+            Icons.Rounded.GraphicEq, Accent.Ember, true, "بستخرج ${p.index + 1} من ${p.total}",
+            "${p.name} — ${(p.progress * 100).toInt()}%\nكل ملف بيتحفظ لوحده أول ما يخلص", (p.index + p.progress) / p.total,
+        )
+        is Phase.BatchDone -> S(
+            Icons.Rounded.CheckCircle, Accent.Mint, false, "خلصنا ${p.saved} ملف",
+            if (p.failed > 0) "${p.failed} ماخلصوش — شوف القايمة" else "كلهم اتحفظوا في المجموعة", 1f,
+        )
         Phase.Idle -> return
     }
     Column(

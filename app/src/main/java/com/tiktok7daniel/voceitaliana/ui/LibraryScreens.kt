@@ -1,7 +1,11 @@
 package com.tiktok7daniel.voceitaliana.ui
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -25,12 +30,18 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Topic
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
@@ -53,6 +65,7 @@ import androidx.compose.ui.window.Dialog
 import com.tiktok7daniel.voceitaliana.library.Group
 import com.tiktok7daniel.voceitaliana.library.Library
 import com.tiktok7daniel.voceitaliana.library.Note
+import com.tiktok7daniel.voceitaliana.library.PdfExport
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -66,6 +79,7 @@ sealed interface Page {
     data object Home : Page
     data object Groups : Page
     data class OneGroup(val groupId: String) : Page
+    data class OneSection(val groupId: String, val sectionId: String) : Page
     data class OneNote(val groupId: String, val noteId: String) : Page
 }
 
@@ -77,27 +91,17 @@ fun GroupsPage(lib: Library, onBack: () -> Unit, onOpen: (Group) -> Unit) {
             NeonButton("مجموعة جديدة", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder) { creating = true }
         }
         if (lib.groups.isEmpty()) {
-            item { EmptyHint("لسه مفيش مجموعات", "اعمل مجموعة، وبعد ما يطلع النص دوس \"حفظ في مجموعة\"") }
+            item { EmptyHint("لسه مفيش مجموعات", "اعمل مجموعة لكل مادة، وجواها أقسام لكل فصل أو درس") }
         }
         items(lib.groups, key = { it.id }) { g ->
-            Row(
-                Modifier.fillMaxWidth().clip(NoteShape).glass(NoteShape).clickable { onOpen(g) }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                GlowIcon(Icons.Rounded.Folder, Accent.Amber, size = 46)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(g.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "${g.notes.size} تسجيل · آخر حاجة ${dayLabel(g.lastActivity)}",
-                        style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f),
-                    )
-                }
-            }
+            FolderRow(
+                Icons.Rounded.Folder, Accent.Amber, g.name,
+                "${g.sections.size} قسم · ${g.notes.size} تسجيل · آخر حاجة ${dayLabel(g.lastActivity)}",
+            ) { onOpen(g) }
         }
     }
     if (creating) {
-        NameDialog("مجموعة جديدة", "اسم المجموعة", "", onDismiss = { creating = false }) {
+        NameDialog("مجموعة جديدة", "اسم المجموعة (مثلاً اسم المادة)", "", onDismiss = { creating = false }) {
             creating = false
             onOpen(lib.createGroup(it))
         }
@@ -105,42 +109,49 @@ fun GroupsPage(lib: Library, onBack: () -> Unit, onOpen: (Group) -> Unit) {
 }
 
 @Composable
-fun GroupPage(lib: Library, groupId: String, onBack: () -> Unit, onOpen: (Note) -> Unit) {
+fun GroupPage(lib: Library, groupId: String, onBack: () -> Unit, onSection: (String) -> Unit, onOpen: (Note) -> Unit) {
     val g = lib.group(groupId) ?: return GoBack(onBack)
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    val loose = g.notesIn("")
     PageScaffold(
-        g.name, "${g.notes.size} تسجيل", onBack,
+        g.name, "${g.sections.size} قسم · ${g.notes.size} تسجيل", onBack,
         actions = {
             IconOrb(Icons.Rounded.Edit, onClick = { renaming = true })
             Spacer(Modifier.width(8.dp))
             IconOrb(Icons.Rounded.Delete, onClick = { deleting = true })
         },
     ) {
-        if (g.notes.isEmpty()) {
-            item { EmptyHint("المجموعة فاضية", "بعد ما تستخرج الكلام من فويس، دوس \"حفظ في مجموعة\" واختار \"${g.name}\"") }
-        }
-        // One section per day, newest day first.
-        g.notes.groupBy { dayKey(it.created) }.forEach { (_, dayNotes) ->
-            item(key = "day-${dayKey(dayNotes.first().created)}") {
-                SectionTitle(dayLabel(dayNotes.first().created), subtitle = fullDate(dayNotes.first().created), modifier = Modifier.padding(top = 6.dp))
-            }
-            items(dayNotes, key = { it.id }) { n ->
-                Column(
-                    Modifier.fillMaxWidth().clip(NoteShape).glass(NoteShape).clickable { onOpen(n) }.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(n.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(time(n.created), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    }
-                    Text(
-                        n.text.ifBlank { "(فاضي)" },
-                        style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
-                        color = Color.White.copy(alpha = 0.65f), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
+        if (g.notes.isNotEmpty()) {
+            item {
+                PdfButtons(g.name, g.name) {
+                    // Sections in the order they were made, each oldest-first like a notebook.
+                    g.sections.flatMap { s -> g.notesIn(s.id).sortedBy { it.created }.map { PdfExport.Entry(it, s.name) } } +
+                        loose.sortedBy { it.created }.map { PdfExport.Entry(it, "") }
                 }
             }
+        }
+        item { NeonButton("قسم جديد", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder) { creating = true } }
+        items(g.sections, key = { it.id }) { s ->
+            val notes = g.notesIn(s.id)
+            FolderRow(
+                Icons.Rounded.Topic, Accent.Mint, s.name,
+                "${notes.size} تسجيل" + (notes.maxOfOrNull { it.created }?.let { " · آخر حاجة ${dayLabel(it)}" } ?: ""),
+            ) { onSection(s.id) }
+        }
+        if (g.notes.isEmpty() && g.sections.isEmpty()) {
+            item { EmptyHint("المجموعة فاضية", "اعمل أقسام (مثلاً الفصل الأول)، وبعد ما تستخرج الكلام دوس \"حفظ في مجموعة\"") }
+        }
+        if (loose.isNotEmpty()) {
+            item { SectionTitle("من غير قسم", subtitle = "${loose.size} تسجيل", modifier = Modifier.padding(top = 6.dp)) }
+            notesByDay(loose, onOpen)
+        }
+    }
+    if (creating) {
+        NameDialog("قسم جديد في \"${g.name}\"", "اسم القسم (مثلاً الفصل الأول)", "", onDismiss = { creating = false }) {
+            creating = false
+            lib.createSection(g.id, it)?.let { s -> onSection(s.id) }
         }
     }
     if (renaming) {
@@ -150,9 +161,46 @@ fun GroupPage(lib: Library, groupId: String, onBack: () -> Unit, onOpen: (Note) 
         }
     }
     if (deleting) {
-        ConfirmDialog("مسح \"${g.name}\"؟", "هيتمسح معاها ${g.notes.size} تسجيل ومش هترجع", onDismiss = { deleting = false }) {
+        ConfirmDialog("مسح \"${g.name}\"؟", "هيتمسح معاها ${g.sections.size} قسم و${g.notes.size} تسجيل ومش هيرجعوا", onDismiss = { deleting = false }) {
             deleting = false
             lib.deleteGroup(g.id)
+            onBack()
+        }
+    }
+}
+
+@Composable
+fun SectionPage(lib: Library, groupId: String, sectionId: String, onBack: () -> Unit, onOpen: (Note) -> Unit) {
+    val g = lib.group(groupId) ?: return GoBack(onBack)
+    val s = g.section(sectionId) ?: return GoBack(onBack)
+    val notes = g.notesIn(sectionId)
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    PageScaffold(
+        s.name, "${g.name} · ${notes.size} تسجيل", onBack,
+        actions = {
+            IconOrb(Icons.Rounded.Edit, onClick = { renaming = true })
+            Spacer(Modifier.width(8.dp))
+            IconOrb(Icons.Rounded.Delete, onClick = { deleting = true })
+        },
+    ) {
+        if (notes.isEmpty()) {
+            item { EmptyHint("القسم فاضي", "بعد ما تستخرج الكلام دوس \"حفظ في مجموعة\" واختار \"${g.name}\" ثم \"${s.name}\"") }
+        } else {
+            item { PdfButtons("${g.name} - ${s.name}", "${g.name} · ${s.name}") { notes.sortedBy { it.created }.map { PdfExport.Entry(it, s.name) } } }
+        }
+        notesByDay(notes, onOpen)
+    }
+    if (renaming) {
+        NameDialog("تغيير اسم القسم", "اسم القسم", s.name, onDismiss = { renaming = false }) {
+            renaming = false
+            lib.renameSection(g.id, s.id, it)
+        }
+    }
+    if (deleting) {
+        ConfirmDialog("مسح \"${s.name}\"؟", "هيتمسح معاه ${notes.size} تسجيل ومش هيرجعوا", onDismiss = { deleting = false }) {
+            deleting = false
+            lib.deleteSection(g.id, s.id)
             onBack()
         }
     }
@@ -163,14 +211,17 @@ fun NotePage(lib: Library, groupId: String, noteId: String, onBack: () -> Unit, 
     val n = lib.note(groupId, noteId) ?: return GoBack(onBack)
     val ctx = LocalContext.current
     var text by remember(noteId) { mutableStateOf(n.text) }
+    var summary by remember(noteId) { mutableStateOf(n.summary) }
     var renaming by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    val groupName = lib.group(groupId)?.name.orEmpty()
+    val g = lib.group(groupId)
+    val where = listOfNotNull(g?.name, g?.section(n.sectionId)?.name).joinToString(" › ")
+    val save = { lib.updateNote(groupId, noteId, text, summary) }
     PageScaffold(
-        n.title, "$groupName · ${fullDate(n.created)} ${time(n.created)}",
+        n.title, "$where · ${dayLabel(n.created)} ${time(n.created)}",
         onBack = {
-            lib.updateText(groupId, noteId, text)
+            save()
             onBack()
         },
         actions = { IconOrb(Icons.Rounded.Edit, onClick = { renaming = true }) },
@@ -180,28 +231,33 @@ fun NotePage(lib: Library, groupId: String, noteId: String, onBack: () -> Unit, 
                 Modifier.fillMaxWidth().glass(NoteShape, accent = true, alpha = 0.45f).padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (n.source.isNotBlank()) {
-                    Text("من: ${n.source}", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                SectionTitle("النص", subtitle = n.source.ifBlank { null })
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Editor(text, { text = it }, ltr = true, minHeight = 180)
                 }
-                androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    BasicTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        textStyle = TextStyle(color = Color.White, fontSize = 17.sp, lineHeight = 27.sp, textDirection = TextDirection.Ltr),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp)
-                            .clip(RoundedCornerShape(18.dp)).glass(RoundedCornerShape(18.dp), alpha = 0.25f).padding(14.dp),
-                    )
+                SectionTitle("الملخص والمختصرات", subtitle = "اكتب اللي عاوز تذاكره من التسجيل ده")
+                Editor(summary, { summary = it }, ltr = false, minHeight = 120, placeholder = "مثلاً: أهم النقط، الكلمات الجديدة، أسئلة…")
+                if (text != n.text || summary != n.summary) {
+                    NeonButton("حفظ التعديل", Modifier.fillMaxWidth(), Icons.Rounded.Save) { save() }
                 }
-                if (text != n.text) {
-                    NeonButton("حفظ التعديل", Modifier.fillMaxWidth(), Icons.Rounded.Save) { lib.updateText(groupId, noteId, text) }
+            }
+        }
+        item {
+            Column(
+                Modifier.fillMaxWidth().glass(NoteShape, alpha = 0.45f).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                PdfButtons(n.title, n.title) {
+                    save()
+                    listOf(PdfExport.Entry(n.copy(text = text, summary = summary), g?.section(n.sectionId)?.name.orEmpty()))
+                }
+                val both = if (summary.isBlank()) text else "$text\n\n— الملخص —\n$summary"
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GhostButton("نسخ", Modifier.weight(1f), Icons.Rounded.ContentCopy) { copy(ctx, both) }
+                    GhostButton("مشاركة", Modifier.weight(1f), Icons.Rounded.Share) { share(ctx, both) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GhostButton("نسخ", Modifier.weight(1f), Icons.Rounded.ContentCopy) { copy(ctx, text) }
-                    GhostButton("مشاركة", Modifier.weight(1f), Icons.Rounded.Share) { share(ctx, text) }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GhostButton("نقل لمجموعة", Modifier.weight(1f), Icons.Rounded.FolderOpen) { moving = true }
+                    GhostButton("نقل", Modifier.weight(1f), Icons.Rounded.FolderOpen) { moving = true }
                     GhostButton("مسح", Modifier.weight(1f), Icons.Rounded.Delete) { deleting = true }
                 }
             }
@@ -214,14 +270,14 @@ fun NotePage(lib: Library, groupId: String, noteId: String, onBack: () -> Unit, 
         }
     }
     if (moving) {
-        GroupPickerDialog(lib, "نقل لمجموعة", exclude = groupId, onDismiss = { moving = false }) { target ->
+        SaveToGroupDialog(lib, null, onDismiss = { moving = false }, heading = "نقل \"${n.title}\" لـ") { target, sectionId, _ ->
             moving = false
-            lib.updateText(groupId, noteId, text)
-            lib.moveNote(groupId, noteId, target.id)?.let(onMoved)
+            save()
+            lib.moveNote(groupId, noteId, target.id, sectionId)?.let(onMoved)
         }
     }
     if (deleting) {
-        ConfirmDialog("مسح \"${n.title}\"؟", "النص هيتمسح ومش هيرجع", onDismiss = { deleting = false }) {
+        ConfirmDialog("مسح \"${n.title}\"؟", "النص والملخص هيتمسحوا ومش هيرجعوا", onDismiss = { deleting = false }) {
             deleting = false
             lib.deleteNote(groupId, noteId)
             onBack()
@@ -229,60 +285,168 @@ fun NotePage(lib: Library, groupId: String, noteId: String, onBack: () -> Unit, 
     }
 }
 
-/** "Save to group" sheet shown under a fresh transcript: name it, then pick or create a group. */
+/**
+ * Picks where something goes: a group (or a new one), then a section in it (or none, or a new
+ * one). With [defaultTitle] it also asks for the recording's name; null hides that field.
+ */
 @Composable
-fun SaveToGroupDialog(lib: Library, defaultTitle: String, onDismiss: () -> Unit, onSave: (Group, String) -> Unit) {
-    var title by remember { mutableStateOf(defaultTitle) }
-    var newGroup by remember { mutableStateOf("") }
-    DialogCard("حفظ في مجموعة", onDismiss) {
-        Field(title, { title = it }, "اسم التسجيل")
-        if (lib.groups.isNotEmpty()) {
-            Text("اختار المجموعة", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.7f))
-            Column(Modifier.heightIn(max = 240.dp)) {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(lib.groups, key = { it.id }) { g -> GroupChoice(g) { onSave(g, title) } }
-                }
+fun SaveToGroupDialog(
+    lib: Library,
+    defaultTitle: String?,
+    onDismiss: () -> Unit,
+    heading: String = "حفظ في مجموعة",
+    onSave: (group: Group, sectionId: String, title: String) -> Unit,
+) {
+    var title by remember { mutableStateOf(defaultTitle.orEmpty()) }
+    var groupId by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
+    val group = groupId?.let { lib.group(it) }
+    DialogCard(heading, onDismiss) {
+        if (defaultTitle != null) Field(title, { title = it }, "اسم التسجيل")
+        if (group == null) {
+            Hint(if (lib.groups.isEmpty()) "اعمل أول مجموعة" else "اختار المجموعة")
+            ChoiceList(lib.groups.map { Choice(it.id, it.name, "${it.sections.size} قسم · ${it.notes.size}", Icons.Rounded.Folder, Accent.Amber) }) {
+                groupId = it
+                newName = ""
+            }
+            Field(newName, { newName = it }, "أو اسم مجموعة جديدة")
+            NeonButton("إنشاء المجموعة", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled = newName.isNotBlank()) {
+                groupId = lib.createGroup(newName).id
+                newName = ""
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Folder, null, tint = Accent.Amber)
+                Spacer(Modifier.width(8.dp))
+                Text(group.name, Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Chip("غيّر", selected = false) { groupId = null }
+            }
+            Hint("اختار القسم")
+            val choices = listOf(Choice("", "من غير قسم", "${group.notesIn("").size}", Icons.Rounded.Inbox, Color.White.copy(alpha = 0.6f))) +
+                group.sections.map { Choice(it.id, it.name, "${group.notesIn(it.id).size}", Icons.Rounded.Topic, Accent.Mint) }
+            ChoiceList(choices) { onSave(group, it, title) }
+            Field(newName, { newName = it }, "أو اسم قسم جديد")
+            NeonButton("إنشاء القسم وحفظ", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled = newName.isNotBlank()) {
+                lib.createSection(group.id, newName)?.let { onSave(group, it.id, title) }
             }
         }
-        Text(if (lib.groups.isEmpty()) "اعمل أول مجموعة" else "أو مجموعة جديدة", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.7f))
-        Field(newGroup, { newGroup = it }, "اسم المجموعة الجديدة")
-        NeonButton("إنشاء وحفظ", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled = newGroup.isNotBlank()) {
-            onSave(lib.createGroup(newGroup), title)
+    }
+}
+
+/** Save to a file the user picks, or share straight to WhatsApp / Drive / email. */
+@Composable
+private fun PdfButtons(fileName: String, docTitle: String, entries: () -> List<PdfExport.Entry>) {
+    val ctx = LocalContext.current
+    val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) {
+            val ok = runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { PdfExport.write(it, docTitle, entries()) } }.isSuccess
+            Toast.makeText(ctx, if (ok) "اتحفظ PDF" else "مش قادر أحفظ الـ PDF", Toast.LENGTH_SHORT).show()
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NeonButton("حفظ PDF", Modifier.weight(1f), Icons.Rounded.PictureAsPdf) { saver.launch(PdfExport.safeName(fileName)) }
+        GhostButton("مشاركة PDF", Modifier.weight(1f), Icons.Rounded.Share) {
+            runCatching { PdfExport.share(ctx, fileName, docTitle, entries()) }
+                .onFailure { Toast.makeText(ctx, "مش قادر أعمل الـ PDF", Toast.LENGTH_SHORT).show() }
+        }
+    }
+}
+
+/** One section per day, newest day first. */
+private fun LazyListScope.notesByDay(notes: List<Note>, onOpen: (Note) -> Unit) {
+    notes.groupBy { dayKey(it.created) }.forEach { (key, dayNotes) ->
+        item(key = "day-$key") {
+            SectionTitle(dayLabel(dayNotes.first().created), subtitle = fullDate(dayNotes.first().created), modifier = Modifier.padding(top = 6.dp))
+        }
+        items(dayNotes, key = { it.id }) { n -> NoteRow(n) { onOpen(n) } }
+    }
+}
+
+@Composable
+private fun NoteRow(n: Note, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(NoteShape).glass(NoteShape).clickable(onClick = onClick).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(n.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(time(n.created), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        Text(
+            n.text.ifBlank { "(فاضي)" },
+            style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
+            color = Color.White.copy(alpha = 0.65f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        if (n.summary.isNotBlank()) {
+            Text(
+                "📝 ${n.summary}", style = MaterialTheme.typography.bodySmall,
+                color = Accent.Amber.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun GroupPickerDialog(lib: Library, title: String, exclude: String, onDismiss: () -> Unit, onPick: (Group) -> Unit) {
-    var newGroup by remember { mutableStateOf("") }
-    DialogCard(title, onDismiss) {
-        val others = lib.groups.filter { it.id != exclude }
-        if (others.isNotEmpty()) {
-            Column(Modifier.heightIn(max = 280.dp)) {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(others, key = { it.id }) { g -> GroupChoice(g) { onPick(g) } }
-                }
-            }
-        }
-        Field(newGroup, { newGroup = it }, "أو اسم مجموعة جديدة")
-        NeonButton("إنشاء ونقل", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled = newGroup.isNotBlank()) {
-            onPick(lib.createGroup(newGroup))
-        }
-    }
-}
-
-@Composable
-private fun GroupChoice(g: Group, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
+private fun FolderRow(icon: ImageVector, color: Color, title: String, detail: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(shape).glass(shape, alpha = 0.35f).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clip(NoteShape).glass(NoteShape).clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        androidx.compose.material3.Icon(Icons.Rounded.Folder, null, tint = Accent.Amber)
-        Spacer(Modifier.width(10.dp))
-        Text(g.name, Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("${g.notes.size}", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
+        GlowIcon(icon, color, size = 46)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(detail, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
+}
+
+@Composable
+private fun Editor(value: String, onChange: (String) -> Unit, ltr: Boolean, minHeight: Int, placeholder: String = "") {
+    val shape = RoundedCornerShape(18.dp)
+    Box(Modifier.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).glass(shape, alpha = 0.25f).padding(14.dp)) {
+        if (value.isEmpty() && placeholder.isNotEmpty()) {
+            Text(placeholder, color = Color.White.copy(alpha = 0.35f), fontSize = 15.sp)
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            textStyle = TextStyle(
+                color = Color.White, fontSize = 17.sp, lineHeight = 27.sp,
+                textDirection = if (ltr) TextDirection.Ltr else TextDirection.Content,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private data class Choice(val id: String, val name: String, val count: String, val icon: ImageVector, val tint: Color)
+
+@Composable
+private fun ChoiceList(choices: List<Choice>, onPick: (String) -> Unit) {
+    if (choices.isEmpty()) return
+    val shape = RoundedCornerShape(18.dp)
+    Column(Modifier.heightIn(max = 260.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(choices, key = { "c-" + it.id }) { c ->
+                Row(
+                    Modifier.fillMaxWidth().clip(shape).glass(shape, alpha = 0.35f).clickable { onPick(c.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(c.icon, null, tint = c.tint)
+                    Spacer(Modifier.width(10.dp))
+                    Text(c.name, Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(c.count, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(text, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.7f))
 }
 
 @Composable
@@ -344,7 +508,7 @@ private fun PageScaffold(
     subtitle: String,
     onBack: () -> Unit,
     actions: @Composable () -> Unit = {},
-    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+    content: LazyListScope.() -> Unit,
 ) {
     androidx.activity.compose.BackHandler(onBack = onBack)
     GlassBackdrop {
@@ -367,7 +531,7 @@ private fun PageScaffold(
 /** The page's item was deleted or moved away: leave it (outside composition). */
 @Composable
 private fun GoBack(onBack: () -> Unit) {
-    androidx.compose.runtime.LaunchedEffect(Unit) { onBack() }
+    LaunchedEffect(Unit) { onBack() }
 }
 
 private fun dayKey(t: Long): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t))

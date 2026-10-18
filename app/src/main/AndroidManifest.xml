@@ -47,6 +47,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Hands exported PDFs to WhatsApp / Drive / email without exposing other files. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Keeps model downloads and transcriptions running after the app is left. -->
         <service
             android:name=".WorkService"
