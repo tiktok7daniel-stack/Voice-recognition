@@ -66,14 +66,14 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tiktok7daniel.voceitaliana.MainViewModel
+import com.tiktok7daniel.voceitaliana.Engine
 import com.tiktok7daniel.voceitaliana.Phase
 import com.tiktok7daniel.voceitaliana.asr.AsrModel
 
 private val CardShape = RoundedCornerShape(26.dp)
 
 @Composable
-fun MainScreen(vm: MainViewModel) {
+fun MainScreen(vm: Engine) {
     val ctx = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::pick) }
     val saveTxt = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -120,7 +120,7 @@ fun MainScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun FileCard(vm: MainViewModel, onPick: () -> Unit) {
+private fun FileCard(vm: Engine, onPick: () -> Unit) {
     val f = vm.file
     Column(
         Modifier.fillMaxWidth().glass(CardShape, accent = true, alpha = 0.45f).padding(18.dp),
@@ -138,7 +138,7 @@ private fun FileCard(vm: MainViewModel, onPick: () -> Unit) {
                 )
                 if (f != null && f.durationMs > 0) {
                     Text(
-                        "المدة ${MainViewModel.clock(f.durationMs / 1000f)}",
+                        "المدة ${Engine.clock(f.durationMs / 1000f)}",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -172,7 +172,7 @@ private fun FileCard(vm: MainViewModel, onPick: () -> Unit) {
 }
 
 @Composable
-private fun ModelCard(vm: MainViewModel) {
+private fun ModelCard(vm: Engine) {
     val installed = vm.installed[vm.model] == true
     Column(
         Modifier.fillMaxWidth().glass(CardShape).padding(18.dp),
@@ -198,7 +198,7 @@ private fun ModelCard(vm: MainViewModel) {
 }
 
 @Composable
-private fun ModelRow(vm: MainViewModel, m: AsrModel) {
+private fun ModelRow(vm: Engine, m: AsrModel) {
     val selected = vm.model == m
     val installed = vm.installed[m] == true
     val shape = RoundedCornerShape(18.dp)
@@ -235,7 +235,7 @@ private fun ModelRow(vm: MainViewModel, m: AsrModel) {
 }
 
 @Composable
-private fun StatusCard(vm: MainViewModel) {
+private fun StatusCard(vm: Engine) {
     val p = vm.phase
     data class S(val icon: androidx.compose.ui.graphics.vector.ImageVector, val color: Color, val pulse: Boolean, val title: String, val detail: String, val fraction: Float?)
     val s = when (p) {
@@ -243,19 +243,24 @@ private fun StatusCard(vm: MainViewModel) {
             val mb = { b: Long -> b / 1_048_576 }
             S(
                 Icons.Rounded.Download, Accent.Amber, false, "بحمّل ${p.model.title}",
-                if (p.total > 0) "${mb(p.done)} / ${mb(p.total)} MB — مرة واحدة بس" else "${mb(p.done)} MB",
+                (if (p.total > 0) "${mb(p.done)} / ${mb(p.total)} MB — مرة واحدة بس" else "${mb(p.done)} MB") +
+                    "\nتقدر تقفل البرنامج — التحميل هيكمّل في الخلفية",
                 if (p.total > 0) p.done.toFloat() / p.total else null,
             )
         }
+        Phase.Importing -> S(Icons.Rounded.UploadFile, Accent.Amber, false, "بجهّز الملف", "بنسخه جوه التطبيق عشان يكمّل حتى لو قفلته", null)
         Phase.Loading -> S(Icons.Rounded.HourglassTop, Accent.Amber, false, "بجهّز الموديل", "ثواني وهيبدأ", null)
         is Phase.Working -> {
             val f = vm.file
-            val at = if (f != null && f.durationMs > 0) " — وصلت ${MainViewModel.clock(p.progress * f.durationMs / 1000f)} من ${MainViewModel.clock(f.durationMs / 1000f)}" else ""
-            S(Icons.Rounded.GraphicEq, Accent.Ember, true, "بستخرج الكلام الإيطالي", "${(p.progress * 100).toInt()}%$at", p.progress)
+            val at = if (f != null && f.durationMs > 0) " — وصلت ${Engine.clock(p.progress * f.durationMs / 1000f)} من ${Engine.clock(f.durationMs / 1000f)}" else ""
+            S(
+                Icons.Rounded.GraphicEq, Accent.Ember, true, "بستخرج الكلام الإيطالي",
+                "${(p.progress * 100).toInt()}%$at\nتقدر تقفل البرنامج — هيكمّل في الخلفية ويبعتلك إشعار لما يخلص", p.progress,
+            )
         }
         is Phase.Done -> S(
             Icons.Rounded.CheckCircle, Accent.Mint, false, "خلصنا",
-            "${vm.segments.size} جملة في ${MainViewModel.clock(p.seconds)} — تقدر تعدّل النص", 1f,
+            "${vm.segments.size} جملة في ${Engine.clock(p.seconds)} — تقدر تعدّل النص", 1f,
         )
         is Phase.Failed -> S(Icons.Rounded.Error, Accent.Crimson, false, p.title, p.detail, null)
         Phase.Idle -> return
@@ -289,7 +294,7 @@ private fun IndeterminateGlowBar() {
 }
 
 @Composable
-private fun ResultCard(vm: MainViewModel, onCopy: () -> Unit, onShare: () -> Unit, onTxt: () -> Unit, onSrt: () -> Unit) {
+private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTxt: () -> Unit, onSrt: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().glass(CardShape, accent = true, alpha = 0.45f).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),

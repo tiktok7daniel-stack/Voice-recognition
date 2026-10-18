@@ -2,8 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
 
     <application
+        android:name=".VoceApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
@@ -38,5 +44,11 @@
                 <data android:scheme="content" android:mimeType="audio/*" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps model downloads and transcriptions running after the app is left. -->
+        <service
+            android:name=".WorkService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|mediaProcessing" />
     </application>
 </manifest>

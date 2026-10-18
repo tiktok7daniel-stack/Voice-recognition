@@ -1,35 +1,34 @@
 package com.tiktok7daniel.voceitaliana
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
+import androidx.activity.result.contract.ActivityResultContracts
 import com.tiktok7daniel.voceitaliana.ui.MainScreen
 import com.tiktok7daniel.voceitaliana.ui.VoceTheme
 
 class MainActivity : ComponentActivity() {
-    private val vm: MainViewModel by viewModels()
+    private val vm get() = (application as VoceApp).engine
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleIntent(intent)
+        // Needed to show progress while the work runs in the background.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             VoceTheme {
-                // Keep the screen awake while a long file is being transcribed.
-                LaunchedEffect(Unit) {
-                    snapshotFlow { vm.busy }.collect { busy ->
-                        if (busy) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }
-                }
                 MainScreen(vm)
             }
         }

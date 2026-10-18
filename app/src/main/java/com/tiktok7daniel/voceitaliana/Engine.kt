@@ -9,22 +9,23 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.tiktok7daniel.voceitaliana.asr.AsrModel
 import com.tiktok7daniel.voceitaliana.asr.AudioDecoder
 import com.tiktok7daniel.voceitaliana.asr.ModelDownloader
 import com.tiktok7daniel.voceitaliana.asr.Segment
 import com.tiktok7daniel.voceitaliana.asr.Transcriber
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 sealed interface Phase {
     data object Idle : Phase
+    data object Importing : Phase
     data class Downloading(val model: AsrModel, val done: Long, val total: Long) : Phase
     data object Loading : Phase
     data class Working(val progress: Float) : Phase
@@ -34,9 +35,17 @@ sealed interface Phase {
 
 data class PickedFile(val uri: Uri, val name: String, val durationMs: Long)
 
-class MainViewModel(app: Application) : AndroidViewModel(app) {
+/**
+ * Process-wide engine. It lives as long as the app process (not the screen), and while it is
+ * busy [WorkService] keeps the process in the foreground, so downloads and transcriptions carry
+ * on when the user leaves the app or turns the screen off.
+ */
+class Engine(private val app: Application) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val prefs = app.getSharedPreferences("voce", Context.MODE_PRIVATE)
     private val modelsRoot = File(app.filesDir, "models")
+    private val inbox = File(app.filesDir, "inbox")
+    private val lastResult = File(app.filesDir, "last.tsv")
     private val transcriber = Transcriber(app, modelsRoot)
     private var job: Job? = null
 
@@ -53,10 +62,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var showTimestamps by mutableStateOf(false)
     var text by mutableStateOf("")
 
-    val busy get() = phase is Phase.Downloading || phase is Phase.Loading || phase is Phase.Working
+    val busy get() = phase is Phase.Importing || phase is Phase.Downloading || phase is Phase.Loading || phase is Phase.Working
 
     init {
         refreshInstalled()
+        restoreLast()
     }
 
     private fun refreshInstalled() {
@@ -69,24 +79,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("model", m.name).apply()
     }
 
+    /**
+     * Copies the picked/shared audio into app storage first: the read permission another app
+     * grants us ends with the screen, but the transcription may run long after it is closed.
+     */
     fun pick(uri: Uri) {
         if (busy) return
-        val ctx = getApplication<Application>()
-        val name = ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-            if (it.moveToFirst()) it.getString(0) else null
-        } ?: uri.lastPathSegment ?: "audio"
-        file = PickedFile(uri, name, AudioDecoder.durationMs(ctx, uri))
-        phase = Phase.Idle
+        phase = Phase.Importing
+        job = scope.launch {
+            try {
+                file = withContext(Dispatchers.IO) {
+                    val name = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "audio"
+                    inbox.deleteRecursively()
+                    inbox.mkdirs()
+                    val copy = File(inbox, name.replace('/', '_'))
+                    app.contentResolver.openInputStream(uri)!!.use { input -> copy.outputStream().use { input.copyTo(it, 1 shl 20) } }
+                    val local = Uri.fromFile(copy)
+                    PickedFile(local, name, AudioDecoder.durationMs(app, local))
+                }
+                prefs.edit().putString("file", file?.name).apply()
+                phase = Phase.Idle
+            } catch (e: CancellationException) {
+                phase = Phase.Idle
+            } catch (e: Exception) {
+                phase = Phase.Failed("مش قادر أفتح الملف", e.message ?: e.javaClass.simpleName)
+            }
+        }
     }
 
     fun download() {
         if (busy) return
         val m = model
-        job = viewModelScope.launch {
-            phase = Phase.Downloading(m, 0, -1)
+        phase = Phase.Downloading(m, 0, -1)
+        WorkService.start(app)
+        job = scope.launch {
             try {
                 ModelDownloader.download(m, modelsRoot) { done, total ->
-                    phase = Phase.Downloading(m, done, total)
+                    scope.launch { if (phase is Phase.Downloading) phase = Phase.Downloading(m, done, total) }
                 }
                 refreshInstalled()
                 phase = Phase.Idle
@@ -111,18 +142,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val m = model
         segments.clear()
         text = ""
-        job = viewModelScope.launch {
+        lastResult.delete()
+        phase = Phase.Loading
+        WorkService.start(app)
+        job = scope.launch {
             val t0 = System.currentTimeMillis()
             try {
-                phase = Phase.Loading
                 withContext(Dispatchers.Default) { transcriber.load(m) }
                 phase = Phase.Working(0f)
                 withContext(Dispatchers.Default) {
                     transcriber.transcribe(
                         f.uri, m,
-                        onProgress = { p -> launch(Dispatchers.Main) { if (phase is Phase.Working) phase = Phase.Working(p) } },
+                        onProgress = { p -> scope.launch { if (phase is Phase.Working) phase = Phase.Working(p) } },
                         onSegment = { s ->
-                            launch(Dispatchers.Main) {
+                            lastResult.appendText("${s.start}\t${s.end}\t${s.text.replace('\t', ' ').replace('\n', ' ')}\n")
+                            scope.launch {
                                 segments.add(s)
                                 text = render()
                             }
@@ -143,6 +177,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancel() {
         job?.cancel()
+    }
+
+    /** Brings back the last transcript after the app was closed and reopened. */
+    private fun restoreLast() {
+        if (!lastResult.isFile) return
+        runCatching {
+            lastResult.readLines().mapNotNull { line ->
+                val p = line.split('\t', limit = 3)
+                if (p.size == 3) Segment(p[0].toFloat(), p[1].toFloat(), p[2]) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
+            segments.addAll(it)
+            text = render()
+            val name = prefs.getString("file", null) ?: return@let
+            val copy = File(inbox, name.replace('/', '_'))
+            if (copy.isFile) file = PickedFile(Uri.fromFile(copy), name, AudioDecoder.durationMs(app, Uri.fromFile(copy)))
+        }
     }
 
     fun toggleTimestamps() {
@@ -172,10 +223,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }.joinToString("\n")
 
     fun baseName(): String = file?.name?.substringBeforeLast('.')?.ifBlank { null } ?: "trascrizione"
-
-    override fun onCleared() {
-        transcriber.release()
-    }
 
     companion object {
         fun clock(sec: Float): String {
