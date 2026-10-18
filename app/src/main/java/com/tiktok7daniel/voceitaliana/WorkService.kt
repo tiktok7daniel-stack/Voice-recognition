@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.compose.runtime.snapshotFlow
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -42,12 +43,12 @@ class WorkService : Service() {
             return START_NOT_STICKY
         }
         createChannels()
-        val type = when {
-            Build.VERSION.SDK_INT >= 35 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
-            Build.VERSION.SDK_INT >= 29 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            else -> 0
+        if (!goForeground()) {
+            // The system refused a foreground service: the work still runs in the app process,
+            // it just may stop if Android kills the app in the background. Never crash for it.
+            stopSelf()
+            return START_NOT_STICKY
         }
-        ServiceCompat.startForeground(this, ONGOING_ID, progressNotification(engine.phase), type)
 
         if (wakeLock == null) {
             wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
@@ -70,6 +71,34 @@ class WorkService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Downloads are data sync, transcription is media processing (Android 15+ only). Some phones
+     * and Android versions reject one type or the other, so try each before giving up.
+     */
+    private fun goForeground(): Boolean {
+        val types = buildList {
+            if (Build.VERSION.SDK_INT >= 35 && engine.phase !is Phase.Downloading) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING)
+            if (Build.VERSION.SDK_INT >= 29) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            if (Build.VERSION.SDK_INT >= 35) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING)
+            if (Build.VERSION.SDK_INT < 34) add(0)
+        }.distinct()
+        for (type in types) {
+            try {
+                ServiceCompat.startForeground(this, ONGOING_ID, progressNotification(engine.phase), type)
+                return true
+            } catch (e: Exception) {
+                Log.w("VoceItaliana", "startForeground(type=$type) refused", e)
+            }
+        }
+        return false
+    }
+
+    /** Android 15+: the daily time budget for this service type ran out. Stop cleanly instead of crashing. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun finish(phase: Phase) {
@@ -154,7 +183,13 @@ class WorkService : Service() {
         private const val ACTION_STOP = "stop"
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, WorkService::class.java))
+            // Starting can be refused (e.g. ForegroundServiceStartNotAllowedException); the work
+            // itself runs in Engine either way, so losing the service must not close the app.
+            try {
+                ContextCompat.startForegroundService(context, Intent(context, WorkService::class.java))
+            } catch (e: Exception) {
+                Log.w("VoceItaliana", "WorkService not started", e)
+            }
         }
     }
 }
