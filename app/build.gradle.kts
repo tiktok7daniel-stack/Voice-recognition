@@ -18,6 +18,8 @@ android {
         ndk {
             // Real phones only; keeps the APK small.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // CI smoke test runs on an x86_64 emulator.
+            if (project.hasProperty("emulator")) abiFilters += "x86_64"
         }
     }
 

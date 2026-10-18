@@ -52,6 +52,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tiktok7daniel.voceitaliana.Engine
 import com.tiktok7daniel.voceitaliana.Phase
+import com.tiktok7daniel.voceitaliana.VoceApp
 import com.tiktok7daniel.voceitaliana.asr.AsrModel
 
 private val CardShape = RoundedCornerShape(26.dp)
@@ -83,6 +88,9 @@ fun MainScreen(vm: Engine) {
         uri?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(vm.srt().toByteArray()) } }
     }
 
+    val crashFile = remember { (ctx.applicationContext as VoceApp).crashFile }
+    var crash by remember { mutableStateOf(crashFile.takeIf { it.isFile }?.readText()) }
+
     GlassBackdrop {
         Column(Modifier.fillMaxSize()) {
             TopBar(
@@ -95,6 +103,7 @@ fun MainScreen(vm: Engine) {
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
+                crash?.let { report -> item { CrashCard(report, onCopy = { copy(ctx, report) }, onDismiss = { crash = null; crashFile.delete() }) } }
                 item { FileCard(vm) { picker.launch(arrayOf("audio/*", "video/*")) } }
                 item { ModelCard(vm) }
                 if (vm.phase !is Phase.Idle) item { StatusCard(vm) }
@@ -102,11 +111,7 @@ fun MainScreen(vm: Engine) {
                     item {
                         ResultCard(
                             vm,
-                            onCopy = {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("Trascrizione", vm.text))
-                                Toast.makeText(ctx, "اتنسخ", Toast.LENGTH_SHORT).show()
-                            },
+                            onCopy = { copy(ctx, vm.text) },
                             onShare = { share(ctx, vm.text) },
                             onTxt = { saveTxt.launch("${vm.baseName()}.txt") },
                             onSrt = { saveSrt.launch("${vm.baseName()}.srt") },
@@ -346,6 +351,39 @@ private fun Footer() {
             "كل المعالجة على موبايلك — الملف مش بيترفع على أي سيرفر",
             style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f),
         )
+    }
+}
+
+private fun copy(ctx: Context, text: String) {
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("Voce Italiana", text))
+    Toast.makeText(ctx, "اتنسخ", Toast.LENGTH_SHORT).show()
+}
+
+/** Shown after a crash so the report can be sent to the developer. */
+@Composable
+private fun CrashCard(report: String, onCopy: () -> Unit, onDismiss: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().glass(CardShape, accent = true, alpha = 0.45f).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GlowIcon(Icons.Rounded.Error, Accent.Crimson)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("البرنامج قفل المرة اللي فاتت", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+                Text("انسخ التقرير وابعته عشان أصلّح المشكلة", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f))
+            }
+        }
+        Text(
+            report.lineSequence().take(8).joinToString("\n"),
+            style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f),
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).glass(RoundedCornerShape(14.dp), alpha = 0.25f).padding(10.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NeonButton("نسخ التقرير", Modifier.weight(1f), Icons.Rounded.ContentCopy, onClick = onCopy)
+            GhostButton("إخفاء", Modifier.weight(1f), Icons.Rounded.Close, onClick = onDismiss)
+        }
     }
 }
 
