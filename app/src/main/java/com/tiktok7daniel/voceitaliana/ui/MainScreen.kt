@@ -167,25 +167,28 @@ fun MainScreen(vm: Engine) {
 
                 // Jump to the end of the list instead of scrolling by hand.
                 val showJump by remember { derivedStateOf { list.canScrollForward && list.firstVisibleItemIndex > 0 } }
-                AnimatedVisibility(
+                JumpButton(
                     visible = showJump,
-                    enter = scaleIn() + fadeIn(),
-                    exit = scaleOut() + fadeOut(),
                     modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(20.dp),
-                ) {
-                    Box(
-                        Modifier.size(54.dp)
-                            .neonGlow(CircleShape, MaterialTheme.colorScheme.primary, 0.35f, 12.dp)
-                            .clip(CircleShape)
-                            .background(accentBrush())
-                            .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
-                            .clickable { scope.launch { list.animateScrollToItem(list.layoutInfo.totalItemsCount - 1) } },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Rounded.KeyboardDoubleArrowDown, "لآخر الصفحة", tint = Color.White, modifier = Modifier.size(28.dp))
-                    }
-                }
+                ) { scope.launch { list.animateScrollToItem(list.layoutInfo.totalItemsCount - 1) } }
             }
+        }
+    }
+}
+
+@Composable
+private fun JumpButton(visible: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    AnimatedVisibility(visible = visible, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut(), modifier = modifier) {
+        Box(
+            Modifier.size(54.dp)
+                .neonGlow(CircleShape, MaterialTheme.colorScheme.primary, 0.35f, 12.dp)
+                .clip(CircleShape)
+                .background(accentBrush())
+                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.KeyboardDoubleArrowDown, "لآخر الصفحة", tint = Color.White, modifier = Modifier.size(28.dp))
         }
     }
 }
