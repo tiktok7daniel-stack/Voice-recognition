@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -83,47 +84,79 @@ import com.tiktok7daniel.voceitaliana.Phase
 import com.tiktok7daniel.voceitaliana.VoceApp
 import com.tiktok7daniel.voceitaliana.asr.AsrModel
 
-private val CardShape = RoundedCornerShape(26.dp)
+private val CardShape = RoundedCornerShape(30.dp)
 
 @Composable
 fun MainScreen(vm: Engine) {
     var page by remember { mutableStateOf<Page>(Page.Home) }
     val lib = vm.library
-    when (val p = page) {
-        Page.Home -> HomePage(vm, onLibrary = { page = Page.Groups }, onSaved = { g, sec -> page = if (sec.isEmpty()) Page.OneGroup(g) else Page.OneSection(g, sec) })
-        Page.Groups -> GroupsPage(lib, onBack = { page = Page.Home }, onOpen = { page = Page.OneGroup(it.id) })
+    // Files picked for a multi-file job, waiting for the user to choose where to save them.
+    var pendingBatch by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    val pickMany = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) pendingBatch = uris
+    }
+    val onPickMany = { if (!vm.busy) pickMany.launch(arrayOf("audio/*", "video/*")) }
+    if (pendingBatch.isNotEmpty()) {
+        SaveToGroupDialog(
+            lib, null, onDismiss = { pendingBatch = emptyList() },
+            heading = "هحفظ ${pendingBatch.size} ملف فين؟",
+        ) { group, sectionId, _ ->
+            vm.startBatch(pendingBatch, group.id, sectionId)
+            pendingBatch = emptyList()
+            page = Page.Home
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Pages(vm, page, onPickMany) { page = it }
+        if (page == Page.Home || page == Page.Groups) {
+            BottomBar(
+                listOf(
+                    NavItem(Icons.Rounded.Home, "الرئيسية", page == Page.Home) { page = Page.Home },
+                    NavItem(Icons.Rounded.LibraryAdd, "ملفات", false, onPickMany),
+                    NavItem(Icons.Rounded.Folder, "المكتبة", page == Page.Groups) { page = Page.Groups },
+                ),
+                Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Pages(vm: Engine, current: Page, onPickMany: () -> Unit, go: (Page) -> Unit) {
+    val lib = vm.library
+    when (val p = current) {
+        Page.Home -> HomePage(
+            vm, onLibrary = { go(Page.Groups) }, onPickMany = onPickMany,
+            onSaved = { g, sec -> go(if (sec.isEmpty()) Page.OneGroup(g) else Page.OneSection(g, sec)) },
+        )
+        Page.Groups -> GroupsPage(lib, onBack = { go(Page.Home) }, onOpen = { go(Page.OneGroup(it.id)) })
         is Page.OneGroup -> GroupPage(
             lib, p.groupId,
-            onBack = { page = Page.Groups },
-            onSection = { page = Page.OneSection(p.groupId, it) },
-            onOpen = { page = Page.OneNote(it.groupId, it.id) },
+            onBack = { go(Page.Groups) },
+            onSection = { go(Page.OneSection(p.groupId, it)) },
+            onOpen = { go(Page.OneNote(it.groupId, it.id)) },
         )
         is Page.OneSection -> SectionPage(
             lib, p.groupId, p.sectionId,
-            onBack = { page = Page.OneGroup(p.groupId) },
-            onOpen = { page = Page.OneNote(it.groupId, it.id) },
+            onBack = { go(Page.OneGroup(p.groupId)) },
+            onOpen = { go(Page.OneNote(it.groupId, it.id)) },
         )
         is Page.OneNote -> NotePage(
             lib, p.groupId, p.noteId,
             // Back to wherever the note lives now (its section, or the group itself).
             onBack = {
                 val section = lib.note(p.groupId, p.noteId)?.sectionId.orEmpty()
-                page = if (section.isNotEmpty()) Page.OneSection(p.groupId, section) else Page.OneGroup(p.groupId)
+                go(if (section.isNotEmpty()) Page.OneSection(p.groupId, section) else Page.OneGroup(p.groupId))
             },
-            onMoved = { page = Page.OneNote(it.groupId, it.id) },
+            onMoved = { go(Page.OneNote(it.groupId, it.id)) },
         )
     }
 }
 
 @Composable
-private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: String, sectionId: String) -> Unit) {
+private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, onSaved: (groupId: String, sectionId: String) -> Unit) {
     val ctx = LocalContext.current
     var saving by remember { mutableStateOf(false) }
-    // Files picked for a multi-file job, waiting for the user to choose where to save them.
-    var pendingBatch by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
-    val pickMany = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) pendingBatch = uris
-    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::pick) }
     val saveTxt = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         uri?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(vm.text.toByteArray()) } }
@@ -151,36 +184,40 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onSaved: (groupId: Strin
         }
     }
 
-    if (pendingBatch.isNotEmpty()) {
-        SaveToGroupDialog(
-            vm.library, null, onDismiss = { pendingBatch = emptyList() },
-            heading = "هحفظ ${pendingBatch.size} ملف فين؟",
-        ) { group, sectionId, _ ->
-            vm.startBatch(pendingBatch, group.id, sectionId)
-            pendingBatch = emptyList()
-        }
-    }
-
     GlassBackdrop {
         Column(Modifier.fillMaxSize()) {
             TopBar(
-                title = "Voce Italiana",
-                subtitle = "استخراج الكلام الإيطالي من أي ملف صوتي",
-                leading = { IconOrb(Icons.Rounded.GraphicEq, active = true) },
+                title = "أهلاً بيك 👋",
+                subtitle = "Voce Italiana · الكلام الإيطالي لنص",
+                leading = { GlowIcon(Icons.Rounded.GraphicEq, Mono.Black, size = 46) },
                 actions = { IconOrb(Icons.Rounded.Folder, onClick = onLibrary) },
             )
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                item { SectionTitle("الرئيسية", subtitle = "اختار فويس، وسيب الباقي علينا") }
+                item {
+                    val lib = vm.library
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        StatTile(
+                            Icons.Rounded.Description, "التسجيلات", "${lib.groups.sumOf { it.notes.size }}", "محفوظين في المكتبة",
+                            Modifier.weight(1f), onClick = onLibrary,
+                        )
+                        StatTile(
+                            Icons.Rounded.Folder, "المجموعات", "${lib.groups.size}", "${lib.groups.sumOf { it.sections.size }} قسم",
+                            Modifier.weight(1f), onClick = onLibrary,
+                        )
+                    }
+                }
                 crash?.let { report -> item { CrashCard(report, onCopy = { copy(ctx, report) }, onDismiss = { crash = null; crashFile.delete() }) } }
                 if (!backgroundAllowed) item { BackgroundCard { askBackground(ctx) } }
                 item {
                     FileCard(
                         vm,
                         onPick = { picker.launch(arrayOf("audio/*", "video/*")) },
-                        onPickMany = { pickMany.launch(arrayOf("audio/*", "video/*")) },
+                        onPickMany = onPickMany,
                     )
                 }
                 if (vm.batch.isNotEmpty()) item { BatchCard(vm, onOpen = onLibrary) }
@@ -215,10 +252,10 @@ private fun FileCard(vm: Engine, onPick: () -> Unit, onPickMany: () -> Unit) {
             GlowIcon(Icons.Rounded.AudioFile, if (f != null) Accent.Mint else Accent.Amber)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("الملف الصوتي", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+                Text("الملف الصوتي", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink)
                 Text(
                     if (f != null) f.name else "mp3 · m4a · wav · opus · ogg · mp4",
-                    style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.7f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 if (f != null && f.durationMs > 0) {
@@ -242,15 +279,15 @@ private fun FileCard(vm: Engine, onPick: () -> Unit, onPickMany: () -> Unit) {
         ) {
             Icon(
                 Icons.Rounded.UploadFile, null,
-                tint = lerp(MaterialTheme.colorScheme.primary, Color.White, 0.55f), modifier = Modifier.size(34.dp),
+                tint = lerp(MaterialTheme.colorScheme.primary, Ink, 0.55f), modifier = Modifier.size(34.dp),
             )
             Text(
                 if (f == null) "اختار ملف من الموبايل" else "اختار ملف تاني",
-                fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.75f),
+                fontWeight = FontWeight.Bold, color = Ink.copy(alpha = 0.75f),
             )
             Text(
                 "أو اعمل مشاركة للصوت من واتساب لـ Voce Italiana",
-                style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.5f),
             )
         }
         GhostButton("كذا ملف مرة واحدة (تتحفظ في مجموعة)", Modifier.fillMaxWidth(), Icons.Rounded.LibraryAdd, enabled = !vm.busy, onClick = onPickMany)
@@ -277,14 +314,14 @@ private fun BatchCard(vm: Engine, onOpen: () -> Unit) {
                     tint = when (item.ok) {
                         true -> Accent.Mint
                         false -> Accent.Crimson
-                        null -> Color.White.copy(alpha = 0.5f)
+                        null -> Ink.copy(alpha = 0.5f)
                     },
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(item.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(item.state, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f), maxLines = 2)
+                    Text(item.name, color = Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(item.state, style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.6f), maxLines = 2)
                 }
             }
         }
@@ -318,7 +355,7 @@ private fun ModelCard(vm: Engine) {
                 )
         }
         if (installed && vm.file == null && !vm.busy) {
-            Text("اختار ملف صوتي الأول", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f))
+            Text("اختار ملف صوتي الأول", style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.6f))
         }
     }
 }
@@ -339,22 +376,22 @@ private fun ModelRow(vm: Engine, m: AsrModel) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(m.title, fontWeight = FontWeight.Black, color = Color.White, style = MaterialTheme.typography.titleSmall)
+                Text(m.title, fontWeight = FontWeight.Black, color = Ink, style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.width(8.dp))
                 Text(
                     if (installed) "متحمّل" else m.sizeLabel,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (installed) Accent.Mint else Color.White.copy(alpha = 0.5f),
+                    color = if (installed) Accent.Mint else Ink.copy(alpha = 0.5f),
                 )
             }
-            Text(m.tagline, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.7f))
+            Text(m.tagline, style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.7f))
         }
         if (installed && !vm.busy) {
             Box(
                 Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).clickable { vm.deleteModel(m) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.Delete, "حذف", tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.Delete, "حذف", tint = Ink.copy(alpha = 0.45f), modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -407,8 +444,8 @@ private fun StatusCard(vm: Engine) {
             GlowIcon(s.icon, s.color, pulse = s.pulse)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
-                Text(s.detail, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f))
+                Text(s.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink)
+                Text(s.detail, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.7f))
             }
         }
         if (s.fraction != null) GlowBar(s.fraction) else if (p !is Phase.Failed) IndeterminateGlowBar()
@@ -449,7 +486,7 @@ private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTx
                     value = vm.text,
                     onValueChange = { vm.text = it },
                     readOnly = vm.busy,
-                    textStyle = TextStyle(color = Color.White, fontSize = 17.sp, lineHeight = 27.sp, textDirection = TextDirection.Ltr),
+                    textStyle = TextStyle(color = Ink, fontSize = 17.sp, lineHeight = 27.sp, textDirection = TextDirection.Ltr),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -482,10 +519,10 @@ private fun BackgroundCard(onAllow: () -> Unit) {
             GlowIcon(Icons.Rounded.BatteryAlert, Accent.Amber)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("خليه يشتغل في الخلفية", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+                Text("خليه يشتغل في الخلفية", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink)
                 Text(
                     "الموبايل ممكن يقفل البرنامج عشان يوفّر البطارية. اسمح له مرة واحدة والتحميل والاستخراج هيكمّلوا حتى لو قفلت الشاشة",
-                    style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.7f),
                 )
             }
         }
@@ -513,11 +550,11 @@ private fun Footer() {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Rounded.Lock, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+        Icon(Icons.Rounded.Lock, null, tint = Ink.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
         Text(
             "كل المعالجة على موبايلك — الملف مش بيترفع على أي سيرفر",
-            style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f),
+            style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.5f),
         )
     }
 }
@@ -539,13 +576,13 @@ private fun CrashCard(report: String, onCopy: () -> Unit, onDismiss: () -> Unit)
             GlowIcon(Icons.Rounded.Error, Accent.Crimson)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("البرنامج قفل المرة اللي فاتت", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
-                Text("انسخ التقرير وابعته عشان أصلّح المشكلة", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f))
+                Text("البرنامج قفل المرة اللي فاتت", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink)
+                Text("انسخ التقرير وابعته عشان أصلّح المشكلة", style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.7f))
             }
         }
         Text(
             report.lineSequence().take(8).joinToString("\n"),
-            style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f),
+            style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.6f),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).glass(RoundedCornerShape(14.dp), alpha = 0.25f).padding(10.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

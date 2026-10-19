@@ -71,7 +71,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-private val NoteShape = RoundedCornerShape(26.dp)
+private val NoteShape = RoundedCornerShape(30.dp)
 private val Arabic = Locale("ar")
 
 /** Which page of the app is showing. Kept tiny on purpose: no navigation library needed. */
@@ -318,11 +318,11 @@ fun SaveToGroupDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Folder, null, tint = Accent.Amber)
                 Spacer(Modifier.width(8.dp))
-                Text(group.name, Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(group.name, Modifier.weight(1f), color = Ink, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Chip("غيّر", selected = false) { groupId = null }
             }
             Hint("اختار القسم")
-            val choices = listOf(Choice("", "من غير قسم", "${group.notesIn("").size}", Icons.Rounded.Inbox, Color.White.copy(alpha = 0.6f))) +
+            val choices = listOf(Choice("", "من غير قسم", "${group.notesIn("").size}", Icons.Rounded.Inbox, Ink.copy(alpha = 0.6f))) +
                 group.sections.map { Choice(it.id, it.name, "${group.notesIn(it.id).size}", Icons.Rounded.Topic, Accent.Mint) }
             ChoiceList(choices) { onSave(group, it, title) }
             Field(newName, { newName = it }, "أو اسم قسم جديد")
@@ -369,13 +369,13 @@ private fun NoteRow(n: Note, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(n.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(n.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(time(n.created), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
         Text(
             n.text.ifBlank { "(فاضي)" },
             style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
-            color = Color.White.copy(alpha = 0.65f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+            color = Ink.copy(alpha = 0.65f), maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
         if (n.summary.isNotBlank()) {
             Text(
@@ -395,8 +395,8 @@ private fun FolderRow(icon: ImageVector, color: Color, title: String, detail: St
         GlowIcon(icon, color, size = 46)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(detail, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(detail, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -406,13 +406,13 @@ private fun Editor(value: String, onChange: (String) -> Unit, ltr: Boolean, minH
     val shape = RoundedCornerShape(18.dp)
     Box(Modifier.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).glass(shape, alpha = 0.25f).padding(14.dp)) {
         if (value.isEmpty() && placeholder.isNotEmpty()) {
-            Text(placeholder, color = Color.White.copy(alpha = 0.35f), fontSize = 15.sp)
+            Text(placeholder, color = Ink.copy(alpha = 0.35f), fontSize = 15.sp)
         }
         BasicTextField(
             value = value,
             onValueChange = onChange,
             textStyle = TextStyle(
-                color = Color.White, fontSize = 17.sp, lineHeight = 27.sp,
+                color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
                 textDirection = if (ltr) TextDirection.Ltr else TextDirection.Content,
             ),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -436,8 +436,8 @@ private fun ChoiceList(choices: List<Choice>, onPick: (String) -> Unit) {
                 ) {
                     Icon(c.icon, null, tint = c.tint)
                     Spacer(Modifier.width(10.dp))
-                    Text(c.name, Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(c.count, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
+                    Text(c.name, Modifier.weight(1f), color = Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(c.count, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f))
                 }
             }
         }
@@ -446,7 +446,7 @@ private fun ChoiceList(choices: List<Choice>, onPick: (String) -> Unit) {
 
 @Composable
 private fun Hint(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.7f))
+    Text(text, style = MaterialTheme.typography.labelLarge, color = Ink.copy(alpha = 0.7f))
 }
 
 @Composable
@@ -461,7 +461,7 @@ private fun NameDialog(title: String, label: String, initial: String, onDismiss:
 @Composable
 private fun ConfirmDialog(title: String, detail: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     DialogCard(title, onDismiss) {
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.75f))
+        Text(detail, style = MaterialTheme.typography.bodyMedium, color = Ink.copy(alpha = 0.75f))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GhostButton("إلغاء", Modifier.weight(1f), Icons.Rounded.Close, onClick = onDismiss)
             NeonButton("مسح", Modifier.weight(1f), Icons.Rounded.Delete, onClick = onConfirm)
@@ -476,7 +476,7 @@ private fun DialogCard(title: String, onDismiss: () -> Unit, content: @Composabl
             Modifier.fillMaxWidth().glass(NoteShape, accent = true, alpha = 0.92f).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink)
             content()
         }
     }
@@ -497,8 +497,8 @@ private fun EmptyHint(title: String, detail: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(title, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.85f))
-        Text(detail, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.55f))
+        Text(title, fontWeight = FontWeight.Bold, color = Ink.copy(alpha = 0.85f))
+        Text(detail, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.55f))
     }
 }
 
@@ -520,7 +520,8 @@ private fun PageScaffold(
             )
             LazyColumn(
                 modifier = Modifier.fillMaxSize().navigationBarsPadding(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                // Room for the floating bottom bar.
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 content = content,
             )

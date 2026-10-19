@@ -29,16 +29,29 @@ def swipe_up():
     adb("shell", "input", "swipe", str(w // 2), str(h * 3 // 4), str(w // 2), str(h // 4), "400")
 
 
+def screen_height():
+    m = re.search(r"(\d+)x(\d+)", adb("shell", "wm", "size", check=False))
+    return int(m.group(2)) if m else 640
+
+
 def tap(fragment, swipes=6):
+    h = screen_height()
     for _ in range(swipes + 1):
         for text, (x, y) in nodes():
-            if fragment in text:
+            # The floating bottom bar covers the lowest part of the screen: scroll instead.
+            if fragment in text and y < h * 0.8:
                 print(f"tap '{text}' at {x},{y}")
                 adb("shell", "input", "tap", str(x), str(y))
                 return
         swipe_up()
         time.sleep(1)
     raise SystemExit(f"'{fragment}' not found on screen:\n" + "\n".join(t for t, _ in nodes()))
+
+
+def shot(name):
+    """Screenshot for design review; published next to the APK."""
+    with open(name, "wb") as f:
+        f.write(subprocess.run(["adb", "exec-out", "screencap", "-p"], capture_output=True).stdout)
 
 
 def crashed():
@@ -60,6 +73,7 @@ adb("logcat", "-c", "-b", "all", check=False)
 adb("shell", "am", "start", "-W", "-n", f"{PKG}/.MainActivity")
 time.sleep(6)
 print("screen:", screen_text())
+shot("screen-home.png")
 
 tap("Whisper Small")
 time.sleep(1)
@@ -79,4 +93,5 @@ print("notifications:", re.findall(r"android\.title=String \(([^)]*)\)", adb("sh
 adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
 time.sleep(3)
 print("screen after 60s:", screen_text())
+shot("screen-downloading.png")
 print("Smoke test passed: no crash, process alive")

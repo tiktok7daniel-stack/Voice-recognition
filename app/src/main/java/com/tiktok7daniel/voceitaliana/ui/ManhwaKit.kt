@@ -1,5 +1,6 @@
 package com.tiktok7daniel.voceitaliana.ui
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,26 +28,25 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
-fun accentBrush(): Brush {
-    val primary = MaterialTheme.colorScheme.primary
-    return Brush.horizontalGradient(listOf(primary, lerp(primary, Color.Black, 0.45f)))
-}
+fun accentBrush(): Brush = Brush.horizontalGradient(listOf(Mono.Black, Color(0xFF2A2B2F)))
 
-/** Primary action. Only one per card. */
+/** Primary action: black pill. Only one per card. */
 @Composable
 fun NeonButton(
     text: String,
@@ -54,29 +55,26 @@ fun NeonButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(50)
     Row(
         modifier = modifier
-            .alpha(if (enabled) 1f else 0.4f)
-            .neonGlow(shape, colors.primary, if (enabled) 0.25f else 0f, 10.dp)
+            .alpha(if (enabled) 1f else 0.35f)
             .clip(shape)
-            .background(accentBrush())
-            .border(1.dp, Color.White.copy(alpha = 0.25f), shape)
+            .background(Mono.Black)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 15.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
             Spacer(Modifier.width(8.dp))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** Secondary action: plain glass. */
+/** Secondary action: light grey pill. */
 @Composable
 fun GhostButton(
     text: String,
@@ -85,69 +83,59 @@ fun GhostButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val shape = RoundedCornerShape(50)
     Row(
         modifier = modifier
-            .alpha(if (enabled) 1f else 0.4f)
-            .glass(RoundedCornerShape(16.dp), alpha = 0.35f)
+            .alpha(if (enabled) 1f else 0.35f)
+            .clip(shape)
+            .background(Mono.Tile)
+            .border(1.dp, Mono.Line, shape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 13.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(
-                icon, contentDescription = null,
-                tint = lerp(MaterialTheme.colorScheme.primary, Color.White, 0.55f),
-                modifier = Modifier.size(18.dp),
-            )
+            Icon(icon, contentDescription = null, tint = Ink, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
+/** Round icon button: black circle with a white icon; active = white circle with a black icon. */
 @Composable
-fun IconOrb(icon: ImageVector, active: Boolean = false, size: Int = 42, onClick: (() -> Unit)? = null) {
-    val colors = MaterialTheme.colorScheme
+fun IconOrb(icon: ImageVector, active: Boolean = false, size: Int = 44, onClick: (() -> Unit)? = null) {
     Box(
         modifier = Modifier
             .size(size.dp)
             .then(
                 if (active) {
-                    Modifier.neonGlow(CircleShape, colors.primary, 0.35f, 10.dp).clip(CircleShape).background(accentBrush())
+                    Modifier.shadow(6.dp, CircleShape, ambientColor = Color(0x33101318), spotColor = Color(0x33101318))
+                        .clip(CircleShape).background(Mono.Card)
                 } else {
-                    Modifier.glass(RoundedCornerShape((size / 3).dp), alpha = 0.45f)
+                    Modifier.clip(CircleShape).background(Mono.Black)
                 },
             )
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon, contentDescription = null,
-            tint = if (active) Color.White else lerp(colors.primary, Color.White, 0.55f),
-            modifier = Modifier.size((size * 0.5f).dp),
-        )
+        Icon(icon, contentDescription = null, tint = if (active) Ink else Color.White, modifier = Modifier.size((size * 0.46f).dp))
     }
 }
 
 @Composable
 fun TopBar(title: String, subtitle: String? = null, leading: @Composable () -> Unit = {}, actions: @Composable () -> Unit = {}) {
     Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 18.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading()
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    shadow = Shadow(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), blurRadius = 22f),
-                ),
-                fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) {
-                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         actions()
@@ -161,14 +149,13 @@ fun Chip(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -
         text = text,
         style = MaterialTheme.typography.labelLarge,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        color = Color.White.copy(alpha = if (selected) 1f else 0.75f),
+        color = if (selected) Color.White else Ink,
         maxLines = 1,
         modifier = Modifier
             .alpha(if (enabled || selected) 1f else 0.5f)
-            .then(
-                if (selected) Modifier.neonGlow(shape, MaterialTheme.colorScheme.primary, 0.2f, 8.dp).clip(shape).background(accentBrush())
-                else Modifier.glass(shape, alpha = 0.35f),
-            )
+            .clip(shape)
+            .background(if (selected) Mono.Black else Mono.Tile)
+            .border(1.dp, if (selected) Mono.Black else Mono.Line, shape)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 9.dp),
     )
@@ -176,19 +163,12 @@ fun Chip(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -
 
 @Composable
 fun SectionTitle(title: String, subtitle: String? = null, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
-    val colors = MaterialTheme.colorScheme
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.width(4.dp).height(if (subtitle != null) 38.dp else 24.dp)
-                .neonGlow(RoundedCornerShape(2.dp), colors.primary, 0.3f, 6.dp)
-                .background(Brush.verticalGradient(listOf(colors.primary, colors.primary.copy(alpha = 0.2f))), RoundedCornerShape(2.dp)),
-        )
-        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) {
-                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = colors.primary, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         trailing()
     }
@@ -196,37 +176,80 @@ fun SectionTitle(title: String, subtitle: String? = null, modifier: Modifier = M
 
 @Composable
 fun GlowBar(fraction: Float, modifier: Modifier = Modifier) {
-    val colors = MaterialTheme.colorScheme
-    Box(modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.1f))) {
-        Box(
-            Modifier.fillMaxWidth(fraction.coerceIn(0.02f, 1f)).height(6.dp).background(
-                Brush.horizontalGradient(listOf(lerp(colors.primary, Color.Black, 0.3f), colors.primary, Color.White)),
-                RoundedCornerShape(50),
-            ),
-        )
+    Box(modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(Mono.Line)) {
+        Box(Modifier.fillMaxWidth(fraction.coerceIn(0.02f, 1f)).height(8.dp).clip(RoundedCornerShape(50)).background(Mono.Black))
     }
 }
 
-/** Icon in a glowing circle. Color carries meaning: Mint ok, Amber attention, Ember working. */
+/** Icon in a solid circle, like the dashboard tiles. Grey = waiting, red = error, black = the rest. */
 @Composable
 fun GlowIcon(icon: ImageVector, color: Color, size: Int = 54, pulse: Boolean = false) {
-    val glow = if (pulse) {
-        rememberInfiniteTransition(label = "glow").animateFloat(
-            initialValue = 0.18f, targetValue = 0.42f,
-            animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "glowValue",
-        )
+    val scale = if (pulse) {
+        rememberInfiniteTransition(label = "pulse").animateFloat(
+            initialValue = 0.94f, targetValue = 1.04f,
+            animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "pulseValue",
+        ).value
     } else {
-        null
+        1f
     }
     Box(
-        modifier = Modifier.size(size.dp)
-            .neonGlow(CircleShape, color, { glow?.value ?: 0.22f }, 12.dp)
-            .clip(CircleShape)
-            .background(Brush.radialGradient(listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0.12f))))
-            .border(1.dp, color.copy(alpha = 0.6f), CircleShape),
+        modifier = Modifier.size(size.dp).scale(scale).clip(CircleShape).background(color),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size((size * 0.55f).dp))
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size((size * 0.48f).dp))
+    }
+}
+
+/** Dashboard tile: icon circle, label, and a big number. */
+@Composable
+fun StatTile(icon: ImageVector, label: String, value: String, detail: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+    Column(
+        modifier
+            .glass(RoundedCornerShape(28.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        GlowIcon(icon, Mono.Black, size = 40)
+        Column {
+            Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(value, fontSize = 30.sp, fontWeight = FontWeight.Black, color = Ink, maxLines = 1)
+    }
+}
+
+data class NavItem(val icon: ImageVector, val label: String, val selected: Boolean, val onClick: () -> Unit)
+
+/** Floating black pill at the bottom; the selected tab is a white circle with a black icon. */
+@Composable
+fun BottomBar(items: List<NavItem>, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(50)
+    Row(
+        modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 28.dp, vertical = 14.dp)
+            .fillMaxWidth()
+            .shadow(18.dp, shape, ambientColor = Color(0x55101318), spotColor = Color(0x55101318))
+            .clip(shape)
+            .background(Mono.Black)
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items.forEach { item ->
+            val bg by animateColorAsState(if (item.selected) Color.White else Color.Transparent, label = "navBg")
+            Row(
+                Modifier.clip(shape).background(bg).clickable(onClick = item.onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(item.icon, contentDescription = item.label, tint = if (item.selected) Ink else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
+                if (item.selected) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(item.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                }
+            }
+        }
     }
 }
