@@ -166,7 +166,7 @@ fun MainScreen(vm: Engine) {
                 }
 
                 // Jump to the end of the list instead of scrolling by hand.
-                val showJump by remember { derivedStateOf { list.canScrollForward && list.firstVisibleItemIndex > 0 } }
+                val showJump by remember { derivedStateOf { list.canScrollForward } }
                 JumpButton(
                     visible = showJump,
                     modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(20.dp),
