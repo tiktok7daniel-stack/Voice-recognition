@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -29,12 +30,13 @@ import androidx.compose.ui.unit.dp
  */
 fun Modifier.glass(shape: Shape, accent: Boolean = false, alpha: Float = 0.55f): Modifier = composed {
     val colors = MaterialTheme.colorScheme
-    val brushes = remember(colors.primary, colors.surfaceContainerHighest, colors.surfaceContainer, accent, alpha) {
+    val light = colors.background.luminance() > 0.5f
+    val brushes = remember(light, colors.primary, colors.surfaceContainerHighest, colors.surfaceContainer, accent, alpha) {
         Triple(
             Brush.verticalGradient(
                 listOf(
-                    colors.surfaceContainerHighest.copy(alpha = alpha + 0.1f),
-                    colors.surfaceContainer.copy(alpha = alpha),
+                    colors.surfaceContainerHighest.copy(alpha = if (light) alpha + 0.3f else alpha + 0.1f),
+                    colors.surfaceContainer.copy(alpha = if (light) alpha + 0.2f else alpha),
                 ),
             ),
             Brush.linearGradient(
@@ -44,7 +46,7 @@ fun Modifier.glass(shape: Shape, accent: Boolean = false, alpha: Float = 0.55f):
             ),
             Brush.linearGradient(
                 listOf(
-                    Color.White.copy(alpha = if (accent) 0.4f else 0.22f),
+                    (if (light) colors.primary else Color.White).copy(alpha = if (accent) 0.4f else 0.22f),
                     colors.primary.copy(alpha = if (accent) 0.95f else 0.5f),
                     Color.White.copy(alpha = 0.06f),
                 ),
@@ -80,32 +82,36 @@ fun Modifier.neonGlow(shape: Shape, color: Color, strength: () -> Float, spread:
 @Composable
 fun GlassBackdrop(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val primary = MaterialTheme.colorScheme.primary
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFF030304))) {
+    val base = MaterialTheme.colorScheme.background
+    // On the light theme the light spots and the vignette are toned down.
+    val dark = base.luminance() < 0.5f
+    val glow = if (dark) 1f else 0.55f
+    Box(modifier = modifier.fillMaxSize().background(base)) {
         // Own layer, drawn once per size, so scrolling never repaints it.
         Spacer(
             Modifier.matchParentSize().graphicsLayer().drawWithCache {
                 val w = size.width
                 val h = size.height
                 val top = Brush.radialGradient(
-                    listOf(primary.copy(alpha = 0.30f), Color.Transparent),
+                    listOf(primary.copy(alpha = 0.30f * glow), Color.Transparent),
                     center = Offset(w * 0.95f, h * 0.04f), radius = w * 1.05f,
                 )
                 val bottom = Brush.radialGradient(
-                    listOf(primary.copy(alpha = 0.16f), Color(0xFF3A0610).copy(alpha = 0.12f), Color.Transparent),
+                    listOf(primary.copy(alpha = 0.16f * glow), primary.copy(alpha = 0.06f * glow), Color.Transparent),
                     center = Offset(w * 0.05f, h * 0.92f), radius = w * 1.2f,
                 )
                 val dots = Bokeh.map { (x, y, r, a) ->
                     val c = Offset(w * x, h * y)
                     Triple(
                         Brush.radialGradient(
-                            listOf(primary.copy(alpha = a), primary.copy(alpha = a * 0.35f), Color.Transparent),
+                            listOf(primary.copy(alpha = a * glow), primary.copy(alpha = a * 0.35f * glow), Color.Transparent),
                             center = c, radius = w * r,
                         ),
                         c, w * r,
                     )
                 }
                 val vignette = Brush.radialGradient(
-                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                    listOf(Color.Transparent, Color.Black.copy(alpha = if (dark) 0.55f else 0.04f)),
                     center = Offset(w / 2f, h / 2f), radius = maxOf(w, h) * 0.75f,
                 )
                 onDrawBehind {

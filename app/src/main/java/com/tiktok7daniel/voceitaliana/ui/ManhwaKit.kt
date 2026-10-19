@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,12 +98,12 @@ fun GhostButton(
         if (icon != null) {
             Icon(
                 icon, contentDescription = null,
-                tint = lerp(MaterialTheme.colorScheme.primary, Color.White, 0.55f),
+                tint = softPrimary(),
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(6.dp))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = ink(), maxLines = 1)
     }
 }
 
@@ -124,7 +125,7 @@ fun IconOrb(icon: ImageVector, active: Boolean = false, size: Int = 42, onClick:
     ) {
         Icon(
             icon, contentDescription = null,
-            tint = if (active) Color.White else lerp(colors.primary, Color.White, 0.55f),
+            tint = if (active) Color.White else softPrimary(),
             modifier = Modifier.size((size * 0.5f).dp),
         )
     }
@@ -144,7 +145,7 @@ fun TopBar(title: String, subtitle: String? = null, leading: @Composable () -> U
                 style = MaterialTheme.typography.titleLarge.copy(
                     shadow = Shadow(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), blurRadius = 22f),
                 ),
-                fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Black, color = ink(), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (subtitle != null) {
                 Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
@@ -161,7 +162,7 @@ fun Chip(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -
         text = text,
         style = MaterialTheme.typography.labelLarge,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        color = Color.White.copy(alpha = if (selected) 1f else 0.75f),
+        color = if (selected) Color.White else ink(0.75f),
         maxLines = 1,
         modifier = Modifier
             .alpha(if (enabled || selected) 1f else 0.5f)
@@ -188,7 +189,7 @@ fun SectionTitle(title: String, subtitle: String? = null, modifier: Modifier = M
             if (subtitle != null) {
                 Text(subtitle, style = MaterialTheme.typography.labelMedium, color = colors.primary, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = ink(), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         trailing()
     }
@@ -197,7 +198,7 @@ fun SectionTitle(title: String, subtitle: String? = null, modifier: Modifier = M
 @Composable
 fun GlowBar(fraction: Float, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
-    Box(modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.1f))) {
+    Box(modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(ink(0.1f))) {
         Box(
             Modifier.fillMaxWidth(fraction.coerceIn(0.02f, 1f)).height(6.dp).background(
                 Brush.horizontalGradient(listOf(lerp(colors.primary, Color.Black, 0.3f), colors.primary, Color.White)),
@@ -229,4 +230,11 @@ fun GlowIcon(icon: ImageVector, color: Color, size: Int = 54, pulse: Boolean = f
     ) {
         Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size((size * 0.55f).dp))
     }
+}
+
+/** Primary tinted toward the text color: soft pink on dark, deep red on light. */
+@Composable
+fun softPrimary(): Color {
+    val c = MaterialTheme.colorScheme
+    return if (c.background.luminance() < 0.5f) lerp(c.primary, Color.White, 0.55f) else c.primary
 }

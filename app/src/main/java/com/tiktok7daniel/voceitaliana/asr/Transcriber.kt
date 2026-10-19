@@ -18,27 +18,29 @@ data class Segment(val start: Float, val end: Float, val text: String)
  * "hallucinated" sentences Whisper-style decoders produce on quiet parts.
  */
 class Transcriber(private val context: Context, private val modelsRoot: File) {
-    private var recognizer: OfflineRecognizer? = null
-    private var loaded: AsrModel? = null
+    // One recognizer per model, shared by every running job: sherpa-onnx decoding is
+    // thread-safe across streams, so two files can be transcribed at the same time.
+    private val recognizers = HashMap<AsrModel, OfflineRecognizer>()
 
     private fun threads() = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 
-    fun load(model: AsrModel) {
-        if (loaded == model && recognizer != null) return
-        release()
+    @Synchronized
+    fun load(model: AsrModel): OfflineRecognizer = recognizers.getOrPut(model) {
+        // Keep only one big model in memory at a time.
+        recognizers.values.forEach { it.release() }
+        recognizers.clear()
         val config = OfflineRecognizerConfig(
             featConfig = getFeatureConfig(sampleRate = AudioDecoder.SAMPLE_RATE, featureDim = 80),
             modelConfig = model.modelConfig(modelsRoot, threads()),
             decodingMethod = "greedy_search",
         )
-        recognizer = OfflineRecognizer(null, config)
-        loaded = model
+        OfflineRecognizer(null, config)
     }
 
+    @Synchronized
     fun release() {
-        recognizer?.release()
-        recognizer = null
-        loaded = null
+        recognizers.values.forEach { it.release() }
+        recognizers.clear()
     }
 
     suspend fun transcribe(
@@ -47,8 +49,7 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
         onProgress: (Float) -> Unit,
         onSegment: (Segment) -> Unit,
     ) {
-        load(model)
-        val rec = recognizer!!
+        val rec = load(model)
         val isWhisper = model == AsrModel.WhisperTurbo || model == AsrModel.WhisperSmall
         val vad = Vad(
             context.assets,

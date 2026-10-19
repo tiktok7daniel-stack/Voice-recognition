@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import com.tiktok7daniel.voceitaliana.ui.MainScreen
 import com.tiktok7daniel.voceitaliana.ui.VoceTheme
+import com.tiktok7daniel.voceitaliana.ui.addFiles
 
 class MainActivity : ComponentActivity() {
     private val vm get() = (application as VoceApp).engine
@@ -39,15 +40,19 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    /** Audio shared from WhatsApp, a file manager or a recorder. */
+    /** Audio shared from WhatsApp, a file manager or a recorder (one file or several). */
     private fun handleIntent(intent: Intent?) {
-        val uri: Uri? = when (intent?.action) {
-            Intent.ACTION_SEND ->
+        val uris: List<Uri> = when (intent?.action) {
+            Intent.ACTION_SEND -> listOfNotNull(
                 if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            Intent.ACTION_VIEW -> intent.data
-            else -> null
+                else @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM),
+            )
+            Intent.ACTION_SEND_MULTIPLE ->
+                if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+                else @Suppress("DEPRECATION") intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            else -> emptyList()
         }
-        if (uri != null) vm.pick(uri)
+        addFiles(this, vm, uris)
     }
 }
