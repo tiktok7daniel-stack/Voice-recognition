@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Voce" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Voce" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/backdrop</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
-    <color name="backdrop">#FFFFF6F7</color>
+    <color name="backdrop">#FFECEDEF</color>
 </resources>

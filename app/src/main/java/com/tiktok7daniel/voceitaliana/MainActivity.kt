@@ -3,16 +3,17 @@ package com.tiktok7daniel.voceitaliana
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import com.tiktok7daniel.voceitaliana.ui.MainScreen
 import com.tiktok7daniel.voceitaliana.ui.VoceTheme
-import com.tiktok7daniel.voceitaliana.ui.addFiles
 
 class MainActivity : ComponentActivity() {
     private val vm get() = (application as VoceApp).engine
@@ -20,7 +21,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Light UI: dark status/navigation bar icons on the soft grey page.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
         if (savedInstanceState == null) handleIntent(intent)
         // Needed to show progress while the work runs in the background.
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -28,6 +33,7 @@ class MainActivity : ComponentActivity() {
         ) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        vm.resumePendingDownload()
         setContent {
             VoceTheme {
                 MainScreen(vm)
@@ -40,19 +46,15 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    /** Audio shared from WhatsApp, a file manager or a recorder (one file or several). */
+    /** Audio shared from WhatsApp, a file manager or a recorder. */
     private fun handleIntent(intent: Intent?) {
-        val uris: List<Uri> = when (intent?.action) {
-            Intent.ACTION_SEND -> listOfNotNull(
+        val uri: Uri? = when (intent?.action) {
+            Intent.ACTION_SEND ->
                 if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                else @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM),
-            )
-            Intent.ACTION_SEND_MULTIPLE ->
-                if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
-                else @Suppress("DEPRECATION") intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
-            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
-            else -> emptyList()
+                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            Intent.ACTION_VIEW -> intent.data
+            else -> null
         }
-        addFiles(this, vm, uris)
+        if (uri != null) vm.pick(uri)
     }
 }

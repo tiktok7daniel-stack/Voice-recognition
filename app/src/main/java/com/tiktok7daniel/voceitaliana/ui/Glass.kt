@@ -1,71 +1,43 @@
 package com.tiktok7daniel.voceitaliana.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Smoked glass: a half-transparent pane with a top sheen, a neon edge and a soft glow.
- * accent = true makes the edge stronger (important or selected card).
+ * Soft card: white with a gentle shadow (accent = true lifts it a bit more, for the card that
+ * matters most on the screen). A low [alpha] marks a tile nested inside a card: light grey,
+ * flat, no shadow.
  */
-fun Modifier.glass(shape: Shape, accent: Boolean = false, alpha: Float = 0.55f): Modifier = composed {
-    val colors = MaterialTheme.colorScheme
-    val light = colors.background.luminance() > 0.5f
-    val brushes = remember(light, colors.primary, colors.surfaceContainerHighest, colors.surfaceContainer, accent, alpha) {
-        Triple(
-            Brush.verticalGradient(
-                listOf(
-                    colors.surfaceContainerHighest.copy(alpha = if (light) alpha + 0.3f else alpha + 0.1f),
-                    colors.surfaceContainer.copy(alpha = if (light) alpha + 0.2f else alpha),
-                ),
-            ),
-            Brush.linearGradient(
-                0f to Color.White.copy(alpha = 0.09f),
-                0.35f to Color.Transparent,
-                1f to Color.Transparent,
-            ),
-            Brush.linearGradient(
-                listOf(
-                    (if (light) colors.primary else Color.White).copy(alpha = if (accent) 0.4f else 0.22f),
-                    colors.primary.copy(alpha = if (accent) 0.95f else 0.5f),
-                    Color.White.copy(alpha = 0.06f),
-                ),
-            ),
-        )
+fun Modifier.glass(shape: Shape, accent: Boolean = false, alpha: Float = 0.55f): Modifier =
+    if (alpha < 0.45f) {
+        this.clip(shape).background(Mono.Tile, shape)
+    } else {
+        this
+            .shadow(if (accent) 14.dp else 6.dp, shape, ambientColor = ShadowTint, spotColor = ShadowTint)
+            .clip(shape)
+            .background(Mono.Card, shape)
     }
-    this
-        .neonGlow(shape, colors.primary, if (accent) 0.22f else 0.1f)
-        .clip(shape)
-        .background(brushes.first, shape)
-        .background(brushes.second, shape)
-        .border(1.dp, brushes.third, shape)
-}
 
-/** Neon glow around a shape: 4 fading strokes. Much cheaper than a real blur. */
+private val ShadowTint = Color(0x33101318)
+
+/** Soft halo around a shape: 4 fading strokes, cheaper than a blur. */
 fun Modifier.neonGlow(shape: Shape, color: Color, strength: Float = 0.18f, spread: Dp = 10.dp): Modifier =
     if (strength <= 0f) this else neonGlow(shape, color, { strength }, spread)
 
-/** Animated variant: the value is read at draw time only, so pulsing never recomposes the card. */
+/** Animated variant: the value is read at draw time only, so pulsing never recomposes. */
 fun Modifier.neonGlow(shape: Shape, color: Color, strength: () -> Float, spread: Dp = 10.dp): Modifier =
     drawWithCache {
         val outline = shape.createOutline(size, layoutDirection, this)
@@ -78,63 +50,10 @@ fun Modifier.neonGlow(shape: Shape, color: Color, strength: () -> Float, spread:
         }
     }
 
-/** Night-city backdrop that must sit behind every glass screen. */
+/** Plain soft-grey page behind every screen. */
 @Composable
 fun GlassBackdrop(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
-    val primary = MaterialTheme.colorScheme.primary
-    val base = MaterialTheme.colorScheme.background
-    // On the light theme the light spots and the vignette are toned down.
-    val dark = base.luminance() < 0.5f
-    val glow = if (dark) 1f else 0.55f
-    Box(modifier = modifier.fillMaxSize().background(base)) {
-        // Own layer, drawn once per size, so scrolling never repaints it.
-        Spacer(
-            Modifier.matchParentSize().graphicsLayer().drawWithCache {
-                val w = size.width
-                val h = size.height
-                val top = Brush.radialGradient(
-                    listOf(primary.copy(alpha = 0.30f * glow), Color.Transparent),
-                    center = Offset(w * 0.95f, h * 0.04f), radius = w * 1.05f,
-                )
-                val bottom = Brush.radialGradient(
-                    listOf(primary.copy(alpha = 0.16f * glow), primary.copy(alpha = 0.06f * glow), Color.Transparent),
-                    center = Offset(w * 0.05f, h * 0.92f), radius = w * 1.2f,
-                )
-                val dots = Bokeh.map { (x, y, r, a) ->
-                    val c = Offset(w * x, h * y)
-                    Triple(
-                        Brush.radialGradient(
-                            listOf(primary.copy(alpha = a * glow), primary.copy(alpha = a * 0.35f * glow), Color.Transparent),
-                            center = c, radius = w * r,
-                        ),
-                        c, w * r,
-                    )
-                }
-                val vignette = Brush.radialGradient(
-                    listOf(Color.Transparent, Color.Black.copy(alpha = if (dark) 0.55f else 0.04f)),
-                    center = Offset(w / 2f, h / 2f), radius = maxOf(w, h) * 0.75f,
-                )
-                onDrawBehind {
-                    drawRect(top)
-                    drawRect(bottom)
-                    dots.forEach { (brush, c, r) -> drawCircle(brush, radius = r, center = c) }
-                    drawRect(vignette)
-                }
-            },
-        )
+    Box(modifier = modifier.fillMaxSize().background(Mono.Page)) {
         content()
     }
 }
-
-private data class Dot(val x: Float, val y: Float, val r: Float, val a: Float)
-
-// Light spots: fraction of width/height, radius fraction, alpha.
-private val Bokeh = listOf(
-    Dot(0.82f, 0.18f, 0.10f, 0.16f),
-    Dot(0.12f, 0.30f, 0.06f, 0.12f),
-    Dot(0.65f, 0.46f, 0.04f, 0.14f),
-    Dot(0.25f, 0.62f, 0.12f, 0.08f),
-    Dot(0.90f, 0.72f, 0.07f, 0.12f),
-    Dot(0.45f, 0.86f, 0.05f, 0.14f),
-    Dot(0.05f, 0.08f, 0.08f, 0.10f),
-)
