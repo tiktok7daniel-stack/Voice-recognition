@@ -23,6 +23,8 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
 
     private fun threads() = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 
+    // Synchronized: two files of a batch share one recognizer and may ask for it together.
+    @Synchronized
     fun load(model: AsrModel) {
         if (loaded == model && recognizer != null) return
         release()
@@ -35,6 +37,7 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
         loaded = model
     }
 
+    @Synchronized
     fun release() {
         recognizer?.release()
         recognizer = null
@@ -48,7 +51,7 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
         onSegment: (Segment) -> Unit,
     ) {
         load(model)
-        val rec = recognizer!!
+        val rec = synchronized(this) { recognizer!! }
         val isWhisper = model == AsrModel.WhisperTurbo || model == AsrModel.WhisperSmall
         val vad = Vad(
             context.assets,

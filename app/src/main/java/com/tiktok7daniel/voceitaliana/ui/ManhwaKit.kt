@@ -1,5 +1,20 @@
 package com.tiktok7daniel.voceitaliana.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.KeyboardDoubleArrowDown
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -44,7 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun accentBrush(): Brush = Brush.horizontalGradient(listOf(Mono.Black, Color(0xFF2A2B2F)))
+fun accentBrush(): Brush = Brush.horizontalGradient(listOf(Mono.Black, if (Mono.dark) Color(0xFFCFCFD4) else Color(0xFF2A2B2F)))
 
 /** Primary action: black pill. Only one per card. */
 @Composable
@@ -67,10 +82,10 @@ fun NeonButton(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+            Icon(icon, contentDescription = null, tint = Mono.OnBlack, modifier = Modifier.size(19.dp))
             Spacer(Modifier.width(8.dp))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Mono.OnBlack, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -120,7 +135,7 @@ fun IconOrb(icon: ImageVector, active: Boolean = false, size: Int = 44, onClick:
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = if (active) Ink else Color.White, modifier = Modifier.size((size * 0.46f).dp))
+        Icon(icon, contentDescription = null, tint = if (active) Ink else Mono.OnBlack, modifier = Modifier.size((size * 0.46f).dp))
     }
 }
 
@@ -149,7 +164,7 @@ fun Chip(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -
         text = text,
         style = MaterialTheme.typography.labelLarge,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        color = if (selected) Color.White else Ink,
+        color = if (selected) Mono.OnBlack else Ink,
         maxLines = 1,
         modifier = Modifier
             .alpha(if (enabled || selected) 1f else 0.5f)
@@ -197,7 +212,7 @@ fun GlowIcon(icon: ImageVector, color: Color, size: Int = 54, pulse: Boolean = f
         modifier = Modifier.size(size.dp).scale(scale).clip(CircleShape).background(color),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size((size * 0.48f).dp))
+        Icon(icon, contentDescription = null, tint = if (color == Mono.Black) Mono.OnBlack else Color.White, modifier = Modifier.size((size * 0.48f).dp))
     }
 }
 
@@ -239,17 +254,79 @@ fun BottomBar(items: List<NavItem>, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEach { item ->
-            val bg by animateColorAsState(if (item.selected) Color.White else Color.Transparent, label = "navBg")
+            val bg by animateColorAsState(if (item.selected) Mono.OnBlack else Color.Transparent, label = "navBg")
             Row(
                 Modifier.clip(shape).background(bg).clickable(onClick = item.onClick).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(item.icon, contentDescription = item.label, tint = if (item.selected) Ink else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
+                Icon(item.icon, contentDescription = item.label, tint = if (item.selected) Mono.Black else Mono.OnBlack.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
                 if (item.selected) {
                     Spacer(Modifier.width(8.dp))
-                    Text(item.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                    Text(item.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Mono.Black, maxLines = 1)
                 }
             }
+        }
+    }
+}
+
+/**
+ * A card that folds to a single line (icon, title, one-line summary). Tap the line to open it;
+ * an open card shows a small "fold" handle under its content.
+ */
+@Composable
+fun Foldable(
+    open: Boolean,
+    onToggle: () -> Unit,
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    content: @Composable () -> Unit,
+) {
+    AnimatedContent(targetState = open, label = "fold") { isOpen ->
+        if (isOpen) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                content()
+                Row(
+                    Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Mono.Tile)
+                        .clickable(onClick = onToggle).padding(horizontal = 14.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.ExpandLess, "تصغير", tint = Ink.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+                }
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).clickable(onClick = onToggle)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlowIcon(icon, Mono.Black, size = 36)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                    Text(summary, style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Icon(Icons.Rounded.ExpandMore, "فتح", tint = Ink.copy(alpha = 0.5f))
+            }
+        }
+    }
+}
+
+/** Round button that scrolls a list to its end; shows only while there is more below. */
+@Composable
+fun JumpToEnd(list: LazyListState, modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    val visible by remember { derivedStateOf { list.canScrollForward } }
+    AnimatedVisibility(visible, modifier, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+        Box(
+            Modifier.size(52.dp)
+                .shadow(10.dp, CircleShape, ambientColor = Color(0x55101318), spotColor = Color(0x55101318))
+                .clip(CircleShape)
+                .background(Mono.Black)
+                .clickable { scope.launch { list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) } },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.KeyboardDoubleArrowDown, "لآخر الصفحة", tint = Mono.OnBlack, modifier = Modifier.size(26.dp))
         }
     }
 }

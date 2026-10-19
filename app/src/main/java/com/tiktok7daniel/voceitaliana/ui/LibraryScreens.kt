@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -518,13 +519,18 @@ private fun PageScaffold(
                 leading = { IconOrb(Icons.AutoMirrored.Rounded.ArrowBack, onClick = onBack) },
                 actions = actions,
             )
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().navigationBarsPadding(),
-                // Room for the floating bottom bar.
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                content = content,
-            )
+            val list = rememberLazyListState()
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = list,
+                    modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                    // Room for the floating bottom bar.
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    content = content,
+                )
+                JumpToEnd(list, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = 100.dp))
+            }
         }
     }
 }

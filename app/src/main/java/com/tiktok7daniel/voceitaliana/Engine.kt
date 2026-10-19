@@ -22,6 +22,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -241,8 +244,8 @@ class Engine(private val app: Application) {
 
     /**
      * Transcribes several files back to back and saves each transcript straight into the given
-     * group/section, named after its file. One at a time on purpose: a phone has the RAM and
-     * cores for one model run, and two in parallel would each go at half speed anyway.
+     * group/section, named after its file. Two files run at the same time on one shared model;
+     * the rest wait for a free slot.
      */
     fun startBatch(uris: List<Uri>, groupId: String, sectionId: String) {
         if (busy || uris.isEmpty()) return
@@ -275,35 +278,57 @@ class Engine(private val app: Application) {
                 batch.addAll(files.map { BatchItem(it.first, "مستني") })
                 phase = Phase.Loading
                 withContext(Dispatchers.Default) { transcriber.load(m) }
-                files.forEachIndexed { i, (name, copy) ->
-                    phase = Phase.Batch(i, files.size, name, 0f)
-                    batch[i] = BatchItem(name, "شغال…")
-                    try {
-                        if (!copy.isFile || copy.length() == 0L) throw java.io.IOException("الملف ماتنسخش")
-                        val found = mutableListOf<Segment>()
-                        withContext(Dispatchers.Default) {
-                            transcriber.transcribe(
-                                Uri.fromFile(copy), m,
-                                onProgress = { p -> scope.launch { if (phase is Phase.Batch) phase = Phase.Batch(i, files.size, name, p) } },
-                                onSegment = { found.add(it) },
-                            )
+                // Two files at a time share the loaded model (sherpa-onnx decoding is thread-safe).
+                val progress = FloatArray(files.size)
+                val running = linkedSetOf<Int>()
+                fun report() {
+                    val done = batch.count { it.ok != null }
+                    val inFlight = running.sumOf { progress[it].toDouble() }.toFloat()
+                    phase = Phase.Batch(done, files.size, running.joinToString(" + ") { files[it].first }, (done + inFlight) / files.size)
+                }
+                val slots = Semaphore(PARALLEL)
+                coroutineScope {
+                    files.forEachIndexed { i, (name, copy) ->
+                        launch {
+                            slots.withPermit {
+                                running += i
+                                batch[i] = BatchItem(name, "شغال…")
+                                report()
+                                try {
+                                    if (!copy.isFile || copy.length() == 0L) throw java.io.IOException("الملف ماتنسخش")
+                                    val found = mutableListOf<Segment>()
+                                    withContext(Dispatchers.Default) {
+                                        transcriber.transcribe(
+                                            Uri.fromFile(copy), m,
+                                            onProgress = { p ->
+                                                scope.launch {
+                                                    progress[i] = p
+                                                    if (batch[i].ok == null) batch[i] = BatchItem(name, "شغال… ${(p * 100).toInt()}%")
+                                                    if (phase is Phase.Batch) report()
+                                                }
+                                            },
+                                            onSegment = { synchronized(found) { found.add(it) } },
+                                        )
+                                    }
+                                    val note = library.addNote(groupId, sectionId, name.substringBeforeLast('.').ifBlank { name }, paragraphs(found), name)
+                                    if (note == null) throw java.io.IOException("المجموعة اتمسحت")
+                                    batch[i] = BatchItem(name, "اتحفظ — ${found.size} جملة", ok = true)
+                                    saved++
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: OutOfMemoryError) {
+                                    batch[i] = BatchItem(name, "الرام مش كفاية — جرّب موديل أخف", ok = false)
+                                    failed++
+                                } catch (e: Exception) {
+                                    batch[i] = BatchItem(name, "فشل: ${e.message ?: e.javaClass.simpleName}", ok = false)
+                                    failed++
+                                } finally {
+                                    running -= i
+                                    copy.delete()
+                                    report()
+                                }
+                            }
                         }
-                        val note = library.addNote(groupId, sectionId, name.substringBeforeLast('.').ifBlank { name }, paragraphs(found), name)
-                        if (note == null) throw java.io.IOException("المجموعة اتمسحت")
-                        batch[i] = BatchItem(name, "اتحفظ — ${found.size} جملة", ok = true)
-                        saved++
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: OutOfMemoryError) {
-                        transcriber.release()
-                        batch[i] = BatchItem(name, "الرام مش كفاية — جرّب موديل أخف", ok = false)
-                        failed++
-                        withContext(Dispatchers.Default) { transcriber.load(m) }
-                    } catch (e: Exception) {
-                        batch[i] = BatchItem(name, "فشل: ${e.message ?: e.javaClass.simpleName}", ok = false)
-                        failed++
-                    } finally {
-                        copy.delete()
                     }
                 }
                 phase = Phase.BatchDone(saved, failed)
@@ -375,6 +400,9 @@ class Engine(private val app: Application) {
     fun baseName(): String = file?.name?.substringBeforeLast('.')?.ifBlank { null } ?: "trascrizione"
 
     companion object {
+        /** How many files of a multi-file job are transcribed at the same time. */
+        const val PARALLEL = 2
+
         fun clock(sec: Float): String {
             val s = sec.toInt()
             return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)

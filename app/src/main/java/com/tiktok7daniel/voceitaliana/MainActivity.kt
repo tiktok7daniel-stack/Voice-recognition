@@ -23,8 +23,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Light UI: dark status/navigation bar icons on the soft grey page.
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            // Dark status-bar icons on the white theme, light ones on the black theme.
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         if (savedInstanceState == null) handleIntent(intent)
         // Needed to show progress while the work runs in the background.

@@ -31,6 +31,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.material.icons.rounded.UnfoldLess
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -165,6 +170,10 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
         uri?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(vm.srt().toByteArray()) } }
     }
 
+    val list = rememberLazyListState()
+    // Card key -> open? Missing means open.
+    val folds = remember { mutableStateMapOf<String, Boolean>() }
+    val allFolded = FoldKeys.all { folds[it] == false }
     val crashFile = remember { (ctx.applicationContext as VoceApp).crashFile }
     var crash by remember { mutableStateOf(crashFile.takeIf { it.isFile }?.readText()) }
 
@@ -190,9 +199,19 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
                 title = "أهلاً بيك 👋",
                 subtitle = "Voce Italiana · الكلام الإيطالي لنص",
                 leading = { GlowIcon(Icons.Rounded.GraphicEq, Mono.Black, size = 46) },
-                actions = { IconOrb(Icons.Rounded.Folder, onClick = onLibrary) },
+                actions = {
+                    // Folds every card into one line, or opens them all again.
+                    IconOrb(if (allFolded) Icons.Rounded.UnfoldMore else Icons.Rounded.UnfoldLess, active = true) {
+                        val fold = !allFolded
+                        FoldKeys.forEach { folds[it] = !fold }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    IconOrb(Icons.Rounded.Folder, onClick = onLibrary)
+                },
             )
+            Box(Modifier.fillMaxSize()) {
             LazyColumn(
+                state = list,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -214,17 +233,31 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
                 crash?.let { report -> item { CrashCard(report, onCopy = { copy(ctx, report) }, onDismiss = { crash = null; crashFile.delete() }) } }
                 if (!backgroundAllowed) item { BackgroundCard { askBackground(ctx) } }
                 item {
-                    FileCard(
-                        vm,
-                        onPick = { picker.launch(arrayOf("audio/*", "video/*")) },
-                        onPickMany = onPickMany,
-                    )
+                    Foldable(folds["file"] != false, { folds["file"] = folds["file"] == false }, Icons.Rounded.AudioFile, "الملف", vm.file?.name ?: "اختار فويس أو أكتر") {
+                        FileCard(
+                            vm,
+                            onPick = { picker.launch(arrayOf("audio/*", "video/*")) },
+                            onPickMany = onPickMany,
+                        )
+                    }
                 }
-                if (vm.batch.isNotEmpty()) item { BatchCard(vm, onOpen = onLibrary) }
-                item { ModelCard(vm) }
+                if (vm.batch.isNotEmpty()) item {
+                    Foldable(folds["batch"] != false, { folds["batch"] = folds["batch"] == false }, Icons.Rounded.Checklist, "الملفات",
+                        "${vm.batch.count { it.ok == true }} من ${vm.batch.size} اتحفظوا") {
+                        BatchCard(vm, onOpen = onLibrary)
+                    }
+                }
+                item {
+                    Foldable(folds["model"] != false, { folds["model"] = folds["model"] == false }, Icons.Rounded.Memory, "الموديل",
+                        vm.model.title + if (vm.installed[vm.model] == true) " · متحمّل" else "") {
+                        ModelCard(vm)
+                    }
+                }
                 if (vm.phase !is Phase.Idle) item { StatusCard(vm) }
                 if (vm.segments.isNotEmpty() || vm.phase is Phase.Done) {
                     item {
+                        Foldable(folds["result"] != false, { folds["result"] = folds["result"] == false }, Icons.Rounded.Description, "النص",
+                            vm.text.lineSequence().firstOrNull { it.isNotBlank() } ?: "…") {
                         ResultCard(
                             vm,
                             onCopy = { copy(ctx, vm.text) },
@@ -233,13 +266,20 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
                             onSrt = { saveSrt.launch("${vm.baseName()}.srt") },
                             onSaveToGroup = { saving = true },
                         )
+                        }
                     }
                 }
                 item { Footer() }
             }
+            // Above the floating bottom bar.
+            JumpToEnd(list, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = 100.dp))
+            }
         }
     }
 }
+
+/** Cards on the home screen that fold to one line. */
+private val FoldKeys = listOf("file", "batch", "model", "result")
 
 @Composable
 private fun FileCard(vm: Engine, onPick: () -> Unit, onPickMany: () -> Unit) {
@@ -427,8 +467,8 @@ private fun StatusCard(vm: Engine) {
         )
         is Phase.Failed -> S(Icons.Rounded.Error, Accent.Crimson, false, p.title, p.detail, null)
         is Phase.Batch -> S(
-            Icons.Rounded.GraphicEq, Accent.Ember, true, "بستخرج ${p.index + 1} من ${p.total}",
-            "${p.name} — ${(p.progress * 100).toInt()}%\nكل ملف بيتحفظ لوحده أول ما يخلص", (p.index + p.progress) / p.total,
+            Icons.Rounded.GraphicEq, Accent.Ember, true, "${p.index} من ${p.total} خلصوا — ${(p.progress * 100).toInt()}%",
+            "شغال دلوقتي: ${p.name.ifBlank { "…" }}\n${Engine.PARALLEL} ملفات بيشتغلوا مع بعض، وكل ملف بيتحفظ لوحده أول ما يخلص", p.progress,
         )
         is Phase.BatchDone -> S(
             Icons.Rounded.CheckCircle, Accent.Mint, false, "خلصنا ${p.saved} ملف",
