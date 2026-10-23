@@ -30,7 +30,13 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -175,11 +181,13 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
         onPauseOrDispose {}
     }
 
+    val list = rememberLazyListState()
+
     if (saving) {
-        SaveToGroupDialog(vm.library, vm.baseName(), onDismiss = { saving = false }) { group, sectionId, title ->
+        SaveToGroupDialog(vm.library, vm.baseName(), onDismiss = { saving = false }, heading = "حطه في مجموعة") { group, sectionId, title ->
             saving = false
-            vm.library.addNote(group.id, sectionId, title, vm.text, vm.file?.name.orEmpty())
-            Toast.makeText(ctx, "اتحفظ في \"${group.name}\"", Toast.LENGTH_SHORT).show()
+            vm.fileResult(group.id, sectionId, title)
+            Toast.makeText(ctx, "اتحط في \"${group.name}\"", Toast.LENGTH_SHORT).show()
             onSaved(group.id, sectionId)
         }
     }
@@ -193,6 +201,7 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
                 actions = { IconOrb(Icons.Rounded.Folder, onClick = onLibrary) },
             )
             LazyColumn(
+                state = list,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -238,6 +247,24 @@ private fun HomePage(vm: Engine, onLibrary: () -> Unit, onPickMany: () -> Unit, 
                 item { Footer() }
             }
         }
+        JumpTo(list, Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+/**
+ * Floating arrow over long pages: jumps to the end (e.g. the bottom of a long transcript) and,
+ * once there, back to the top. Hidden while everything fits on screen.
+ */
+@Composable
+internal fun JumpTo(list: LazyListState, modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    val canDown = list.canScrollForward
+    if (!canDown && !list.canScrollBackward) return
+    JumpButton(down = canDown, modifier = modifier.navigationBarsPadding().padding(end = 22.dp, bottom = 96.dp)) {
+        scope.launch {
+            if (canDown) list.animateScrollToItem(maxOf(0, list.layoutInfo.totalItemsCount - 1), scrollOffset = Int.MAX_VALUE / 2)
+            else list.animateScrollToItem(0)
+        }
     }
 }
 
@@ -252,6 +279,7 @@ private fun FileCard(vm: Engine, onPick: () -> Unit, onPickMany: () -> Unit) {
             GlowIcon(Icons.Rounded.AudioFile, if (f != null) Accent.Mint else Accent.Amber)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
+                Eyebrow("الخطوة ١")
                 Text("الملف الصوتي", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink)
                 Text(
                     if (f != null) f.name else "mp3 · m4a · wav · opus · ogg · mp4",
@@ -301,8 +329,9 @@ private fun BatchCard(vm: Engine, onOpen: () -> Unit) {
         Modifier.fillMaxWidth().glass(CardShape, alpha = 0.45f).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SectionTitle("الملفات", subtitle = "${vm.batch.count { it.ok == true }} من ${vm.batch.size} اتحفظوا")
-        vm.batch.forEach { item ->
+        var open by rememberSaveable { mutableStateOf(true) }
+        CollapseHeader("الملفات", "${vm.batch.count { it.ok == true }} من ${vm.batch.size} اتحفظوا · بيشتغلوا ٢ مع بعض", open) { open = !open }
+        if (open) vm.batch.forEach { item ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     when (item.ok) {
@@ -341,8 +370,18 @@ private fun ModelCard(vm: Engine) {
         Modifier.fillMaxWidth().glass(CardShape).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SectionTitle("الموديل", subtitle = "مجاني ومفتوح المصدر · بيشتغل من غير نت")
-        AsrModel.entries.forEach { m -> ModelRow(vm, m) }
+        // Folds to one line once a model is ready, so the page stays short.
+        var open by rememberSaveable { mutableStateOf(!installed) }
+        CollapseHeader(
+            "الموديل",
+            if (open) "مجاني ومفتوح المصدر · بيشتغل من غير نت" else "${vm.model.title} · " + if (installed) "جاهز" else "محتاج تحميل",
+            open, eyebrow = "الخطوة ٢",
+        ) { open = !open }
+        AnimatedVisibility(open) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AsrModel.entries.forEach { m -> ModelRow(vm, m) }
+            }
+        }
         when {
             vm.phase is Phase.Working || vm.phase is Phase.Loading || vm.phase is Phase.Downloading || vm.phase is Phase.Batch ->
                 GhostButton("إيقاف", Modifier.fillMaxWidth(), Icons.Rounded.Close, onClick = vm::cancel)
@@ -427,8 +466,8 @@ private fun StatusCard(vm: Engine) {
         )
         is Phase.Failed -> S(Icons.Rounded.Error, Accent.Crimson, false, p.title, p.detail, null)
         is Phase.Batch -> S(
-            Icons.Rounded.GraphicEq, Accent.Ember, true, "بستخرج ${p.index + 1} من ${p.total}",
-            "${p.name} — ${(p.progress * 100).toInt()}%\nكل ملف بيتحفظ لوحده أول ما يخلص", (p.index + p.progress) / p.total,
+            Icons.Rounded.GraphicEq, Accent.Ember, true, "خلص ${p.index} من ${p.total} — ${(p.progress * 100).toInt()}%",
+            "${p.name}\nكل ملف بيتحفظ لوحده أول ما يخلص", p.progress,
         )
         is Phase.BatchDone -> S(
             Icons.Rounded.CheckCircle, Accent.Mint, false, "خلصنا ${p.saved} ملف",
@@ -470,6 +509,7 @@ private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTx
         Modifier.fillMaxWidth().glass(CardShape, accent = true, alpha = 0.45f).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Eyebrow("الخطوة ٣")
         SectionTitle("النص", subtitle = "Italiano") {
             Chip("توقيتات", selected = vm.showTimestamps, onClick = vm::toggleTimestamps)
         }
@@ -501,7 +541,14 @@ private fun ResultCard(vm: Engine, onCopy: () -> Unit, onShare: () -> Unit, onTx
             GhostButton("حفظ TXT", Modifier.weight(1f), Icons.Rounded.Description, enabled && !vm.busy, onTxt)
             GhostButton("ترجمة SRT", Modifier.weight(1f), Icons.Rounded.Subtitles, enabled && !vm.busy, onSrt)
         }
-        NeonButton("حفظ في مجموعة", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled && !vm.busy, onSaveToGroup)
+        val where = vm.savedNote?.let { vm.library.group(it.first)?.name }
+        if (where != null) {
+            Text("✓ اتحفظ تلقائي في \"$where\" — حطه في المجموعة بتاعته", style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.6f))
+        }
+        NeonButton(
+            if (where == Engine.INBOX_NAME) "حطه في مجموعة" else "حفظ في مجموعة",
+            Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder, enabled && !vm.busy, onSaveToGroup,
+        )
     }
 }
 

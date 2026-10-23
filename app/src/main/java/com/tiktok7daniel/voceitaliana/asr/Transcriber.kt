@@ -21,24 +21,32 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
     private var recognizer: OfflineRecognizer? = null
     private var loaded: AsrModel? = null
 
+    // Two files may be transcribed at once: each has its own decoder and VAD, but they share
+    // one loaded model, so only the model calls are serialised.
+    private val lock = Any()
+
     private fun threads() = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 
     fun load(model: AsrModel) {
-        if (loaded == model && recognizer != null) return
-        release()
-        val config = OfflineRecognizerConfig(
-            featConfig = getFeatureConfig(sampleRate = AudioDecoder.SAMPLE_RATE, featureDim = 80),
-            modelConfig = model.modelConfig(modelsRoot, threads()),
-            decodingMethod = "greedy_search",
-        )
-        recognizer = OfflineRecognizer(null, config)
-        loaded = model
+        synchronized(lock) {
+            if (loaded == model && recognizer != null) return
+            release()
+            val config = OfflineRecognizerConfig(
+                featConfig = getFeatureConfig(sampleRate = AudioDecoder.SAMPLE_RATE, featureDim = 80),
+                modelConfig = model.modelConfig(modelsRoot, threads()),
+                decodingMethod = "greedy_search",
+            )
+            recognizer = OfflineRecognizer(null, config)
+            loaded = model
+        }
     }
 
     fun release() {
-        recognizer?.release()
-        recognizer = null
-        loaded = null
+        synchronized(lock) {
+            recognizer?.release()
+            recognizer = null
+            loaded = null
+        }
     }
 
     suspend fun transcribe(
@@ -48,7 +56,7 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
         onSegment: (Segment) -> Unit,
     ) {
         load(model)
-        val rec = recognizer!!
+        val rec = synchronized(lock) { recognizer } ?: throw IllegalStateException("الموديل ماتحمّلش")
         val isWhisper = model == AsrModel.WhisperTurbo || model == AsrModel.WhisperSmall
         val vad = Vad(
             context.assets,
@@ -71,13 +79,18 @@ class Transcriber(private val context: Context, private val modelsRoot: File) {
             while (!vad.empty()) {
                 val seg = vad.front()
                 vad.pop()
-                val stream = rec.createStream()
                 // Short padding on both sides helps the models with clipped first/last syllables.
                 val pad = FloatArray(AudioDecoder.SAMPLE_RATE / 5)
-                stream.acceptWaveform(pad + seg.samples + pad, AudioDecoder.SAMPLE_RATE)
-                rec.decode(stream)
-                val text = rec.getResult(stream).text.trim()
-                stream.release()
+                val text = synchronized(lock) {
+                    val stream = rec.createStream()
+                    try {
+                        stream.acceptWaveform(pad + seg.samples + pad, AudioDecoder.SAMPLE_RATE)
+                        rec.decode(stream)
+                        rec.getResult(stream).text.trim()
+                    } finally {
+                        stream.release()
+                    }
+                }
                 if (text.isNotEmpty() && !isNoise(text)) {
                     val start = seg.start.toFloat() / AudioDecoder.SAMPLE_RATE
                     onSegment(Segment(start, start + seg.samples.size.toFloat() / AudioDecoder.SAMPLE_RATE, text))

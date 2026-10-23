@@ -63,6 +63,8 @@ object AudioDecoder {
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
+        // Some decoders never hand back the end-of-stream buffer: stop waiting after ~3 s idle.
+        var idleAfterInput = 0
         try {
             codec.configure(format, null, null, 0)
             codec.start()
@@ -84,7 +86,9 @@ object AudioDecoder {
                     }
                 }
                 val outIdx = codec.dequeueOutputBuffer(info, 10_000)
-                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && inputDone) {
+                    if (++idleAfterInput > 300) outputDone = true
+                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val f = codec.outputFormat
                     channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     pcmFloat = f.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
@@ -92,6 +96,7 @@ object AudioDecoder {
                     val rate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     if (rate != resampler.from) resampler = Resampler(rate, SAMPLE_RATE)
                 } else if (outIdx >= 0) {
+                    idleAfterInput = 0
                     val out = codec.getOutputBuffer(outIdx)!!.order(ByteOrder.nativeOrder())
                     out.position(info.offset)
                     out.limit(info.offset + info.size)
@@ -137,7 +142,7 @@ object AudioDecoder {
 
         fun process(input: FloatArray): FloatArray {
             if (from == SAMPLE_RATE) return input
-            val out = FloatArray((input.size / ratio).toInt() + 2)
+            var out = FloatArray((input.size / ratio).toInt() + 4)
             var n = 0
             for (x in input) {
                 val slot = ((index + 1) % window).toInt()
@@ -148,7 +153,9 @@ object AudioDecoder {
                 if (index == 0L) prev = cur
                 while (nextPos <= index) {
                     val frac = (nextPos - (index - 1)).toFloat().coerceIn(0f, 1f)
-                    if (n == out.size) break
+                    // Grow instead of dropping samples: a dropped sample left the read position
+                    // behind for the rest of the file.
+                    if (n == out.size) out = out.copyOf(out.size * 2)
                     out[n++] = prev + (cur - prev) * frac
                     nextPos += ratio
                 }

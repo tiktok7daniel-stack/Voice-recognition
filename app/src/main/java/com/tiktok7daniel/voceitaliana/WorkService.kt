@@ -155,9 +155,9 @@ class WorkService : Service() {
                     .setProgress(1000, (phase.progress * 1000).toInt(), false)
             }
             is Phase.Batch -> {
-                b.setContentTitle("بستخرج ${phase.index + 1} من ${phase.total} — ${(phase.progress * 100).toInt()}%")
+                b.setContentTitle("خلص ${phase.index} من ${phase.total} ملف — ${(phase.progress * 100).toInt()}%")
                     .setContentText(phase.name)
-                    .setProgress(1000, ((phase.index + phase.progress) * 1000 / phase.total).toInt(), false)
+                    .setProgress(1000, (phase.progress * 1000).toInt(), false)
             }
             else -> b.setContentTitle("بجهّز الموديل").setProgress(0, 0, true)
         }

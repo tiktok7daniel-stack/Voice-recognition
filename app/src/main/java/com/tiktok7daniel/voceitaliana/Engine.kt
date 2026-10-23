@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -202,47 +203,124 @@ class Engine(private val app: Application) {
         val m = model
         segments.clear()
         text = ""
+        savedNote = null
         lastResult.delete()
         phase = Phase.Loading
         WorkService.start(app)
         job = scope.launch {
             val t0 = System.currentTimeMillis()
+            // Sentences arrive on a worker thread; the screen gets them in batches about once a
+            // second. Rebuilding and re-laying out the whole text for every sentence froze the
+            // app on long recordings until Android killed it mid-way.
+            val pending = java.util.concurrent.ConcurrentLinkedQueue<Segment>()
+            val flusher = launch {
+                while (true) {
+                    delay(900)
+                    flush(pending)
+                }
+            }
             try {
                 withContext(Dispatchers.Default) { transcriber.load(m) }
                 phase = Phase.Working(0f)
+                val progress = Throttle { p -> scope.launch { if (phase is Phase.Working) phase = Phase.Working(p) } }
                 withContext(Dispatchers.Default) {
-                    transcriber.transcribe(
-                        f.uri, m,
-                        onProgress = { p -> scope.launch { if (phase is Phase.Working) phase = Phase.Working(p) } },
-                        onSegment = { s ->
-                            lastResult.appendText("${s.start}\t${s.end}\t${s.text.replace('\t', ' ').replace('\n', ' ')}\n")
-                            scope.launch {
-                                segments.add(s)
-                                text = render()
-                            }
-                        },
-                    )
+                    lastResult.bufferedWriter().use { log ->
+                        transcriber.transcribe(
+                            f.uri, m,
+                            onProgress = progress::offer,
+                            onSegment = { s ->
+                                log.append("${s.start}\t${s.end}\t${s.text.replace('\t', ' ').replace('\n', ' ')}\n")
+                                log.flush()
+                                pending.add(s)
+                            },
+                        )
+                    }
                 }
+                flusher.cancel()
+                flush(pending)
+                autoSave()
                 phase = Phase.Done((System.currentTimeMillis() - t0) / 1000f)
             } catch (e: CancellationException) {
+                flusher.cancel()
+                flush(pending)
                 phase = Phase.Idle
             } catch (e: OutOfMemoryError) {
+                flusher.cancel()
                 transcriber.release()
                 phase = Phase.Failed("الرام مش كفاية", "جرّب موديل أخف زي Parakeet v3 أو Whisper Small")
             } catch (e: Exception) {
+                flusher.cancel()
+                flush(pending)
                 phase = Phase.Failed("حصل خطأ", e.message ?: e.javaClass.simpleName)
             }
         }
+    }
+
+    /** Moves queued sentences onto the screen in one go, appending instead of rebuilding. */
+    private fun flush(pending: java.util.Queue<Segment>) {
+        if (pending.isEmpty()) return
+        val sb = StringBuilder(text)
+        while (true) {
+            val s = pending.poll() ?: break
+            val prev = segments.lastOrNull()
+            if (prev != null) {
+                sb.append(
+                    when {
+                        showTimestamps -> "\n"
+                        s.start - prev.end > 1.5f -> "\n\n"
+                        else -> " "
+                    },
+                )
+            }
+            sb.append(if (showTimestamps) "[${clock(s.start)}] ${s.text}" else s.text)
+            segments.add(s)
+        }
+        text = sb.toString()
     }
 
     fun cancel() {
         job?.cancel()
     }
 
+    /** The finished transcript as saved in the library (first in the inbox), or null. */
+    var savedNote by mutableStateOf<Pair<String, String>?>(null)
+        private set
+
     /**
-     * Transcribes several files back to back and saves each transcript straight into the given
-     * group/section, named after its file. One at a time on purpose: a phone has the RAM and
-     * cores for one model run, and two in parallel would each go at half speed anyway.
+     * Every finished transcript lands in the "Inbox" group straight away, so nothing is lost
+     * if the app is closed; from there the user moves it into the group it belongs to.
+     */
+    private fun autoSave() {
+        if (text.isBlank()) return
+        val inbox = inboxGroup()
+        library.addNote(inbox, "", baseName(), text, file?.name.orEmpty())?.let { savedNote = inbox to it.id }
+    }
+
+    fun inboxGroup(): String {
+        prefs.getString("inbox", null)?.let { id -> if (library.group(id) != null) return id }
+        val g = library.createGroup(INBOX_NAME)
+        prefs.edit().putString("inbox", g.id).apply()
+        return g.id
+    }
+
+    /** Files the auto-saved transcript under [groupId]/[sectionId] with the user's latest edits. */
+    fun fileResult(groupId: String, sectionId: String, title: String) {
+        val saved = savedNote
+        if (saved == null) {
+            library.addNote(groupId, sectionId, title, text, file?.name.orEmpty())?.let { savedNote = groupId to it.id }
+            return
+        }
+        val (g, id) = saved
+        library.updateNote(g, id, text, library.note(g, id)?.summary.orEmpty())
+        library.renameNote(g, id, title)
+        library.moveNote(g, id, groupId, sectionId)?.let { savedNote = it.groupId to it.id }
+            ?: library.addNote(groupId, sectionId, title, text, file?.name.orEmpty())?.let { savedNote = groupId to it.id }
+    }
+
+    /**
+     * Transcribes several files and saves each transcript straight into the given group/section,
+     * named after its file. Two files run at the same time: they share one loaded model (so RAM
+     * does not double) while reading and cutting the audio of both in parallel.
      */
     fun startBatch(uris: List<Uri>, groupId: String, sectionId: String) {
         if (busy || uris.isEmpty()) return
@@ -275,37 +353,55 @@ class Engine(private val app: Application) {
                 batch.addAll(files.map { BatchItem(it.first, "مستني") })
                 phase = Phase.Loading
                 withContext(Dispatchers.Default) { transcriber.load(m) }
-                files.forEachIndexed { i, (name, copy) ->
-                    phase = Phase.Batch(i, files.size, name, 0f)
-                    batch[i] = BatchItem(name, "شغال…")
-                    try {
-                        if (!copy.isFile || copy.length() == 0L) throw java.io.IOException("الملف ماتنسخش")
-                        val found = mutableListOf<Segment>()
-                        withContext(Dispatchers.Default) {
-                            transcriber.transcribe(
-                                Uri.fromFile(copy), m,
-                                onProgress = { p -> scope.launch { if (phase is Phase.Batch) phase = Phase.Batch(i, files.size, name, p) } },
-                                onSegment = { found.add(it) },
-                            )
-                        }
-                        val note = library.addNote(groupId, sectionId, name.substringBeforeLast('.').ifBlank { name }, paragraphs(found), name)
-                        if (note == null) throw java.io.IOException("المجموعة اتمسحت")
-                        batch[i] = BatchItem(name, "اتحفظ — ${found.size} جملة", ok = true)
-                        saved++
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: OutOfMemoryError) {
-                        transcriber.release()
-                        batch[i] = BatchItem(name, "الرام مش كفاية — جرّب موديل أخف", ok = false)
-                        failed++
-                        withContext(Dispatchers.Default) { transcriber.load(m) }
-                    } catch (e: Exception) {
-                        batch[i] = BatchItem(name, "فشل: ${e.message ?: e.javaClass.simpleName}", ok = false)
-                        failed++
-                    } finally {
-                        copy.delete()
-                    }
+                val progress = FloatArray(files.size)
+                fun report() {
+                    val running = batch.count { it.ok == null && it.state != "مستني" }
+                    phase = Phase.Batch(saved + failed, files.size, "$running شغالين مع بعض", progress.sum() / files.size)
                 }
+                report()
+                val next = java.util.concurrent.atomic.AtomicInteger(0)
+                // Two workers pull files from the list until it is empty.
+                List(minOf(PARALLEL, files.size)) {
+                    launch {
+                        while (true) {
+                            val i = next.getAndIncrement()
+                            if (i >= files.size) break
+                            val (name, copy) = files[i]
+                            batch[i] = BatchItem(name, "شغال…")
+                            report()
+                            try {
+                                if (!copy.isFile || copy.length() == 0L) throw java.io.IOException("الملف ماتنسخش")
+                                val found = java.util.Collections.synchronizedList(mutableListOf<Segment>())
+                                val throttle = Throttle { p ->
+                                    scope.launch {
+                                        progress[i] = p
+                                        if (batch.getOrNull(i)?.ok == null) batch[i] = BatchItem(name, "شغال… ${(p * 100).toInt()}%")
+                                        if (phase is Phase.Batch) report()
+                                    }
+                                }
+                                withContext(Dispatchers.Default) {
+                                    transcriber.transcribe(Uri.fromFile(copy), m, onProgress = throttle::offer, onSegment = { found.add(it) })
+                                }
+                                val note = library.addNote(groupId, sectionId, name.substringBeforeLast('.').ifBlank { name }, paragraphs(found.toList()), name)
+                                    ?: throw java.io.IOException("المجموعة اتمسحت")
+                                batch[i] = BatchItem(name, "اتحفظ في \"${library.group(groupId)?.name.orEmpty()}\" — ${found.size} جملة", ok = true)
+                                saved++
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: OutOfMemoryError) {
+                                batch[i] = BatchItem(name, "الرام مش كفاية — جرّب موديل أخف", ok = false)
+                                failed++
+                            } catch (e: Exception) {
+                                batch[i] = BatchItem(name, "فشل: ${e.message ?: e.javaClass.simpleName}", ok = false)
+                                failed++
+                            } finally {
+                                progress[i] = 1f
+                                copy.delete()
+                            }
+                            report()
+                        }
+                    }
+                }.joinAll()
                 phase = Phase.BatchDone(saved, failed)
             } catch (e: CancellationException) {
                 batch.indices.forEach { if (batch[it].ok == null) batch[it] = batch[it].copy(state = "اتوقف") }
@@ -375,6 +471,9 @@ class Engine(private val app: Application) {
     fun baseName(): String = file?.name?.substringBeforeLast('.')?.ifBlank { null } ?: "trascrizione"
 
     companion object {
+        private const val PARALLEL = 2
+        const val INBOX_NAME = "📥 الوارد"
+
         fun clock(sec: Float): String {
             val s = sec.toInt()
             return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)
@@ -383,6 +482,21 @@ class Engine(private val app: Application) {
         private fun srtTime(sec: Float): String {
             val ms = (sec * 1000).toLong()
             return "%02d:%02d:%02d,%03d".format(ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+        }
+    }
+}
+
+/**
+ * Passes progress on only when it moved by at least half a percent. The decoder reports every
+ * few milliseconds; posting each one to the main thread flooded it on long recordings.
+ */
+private class Throttle(private val onChange: (Float) -> Unit) {
+    @Volatile private var last = -1f
+
+    fun offer(p: Float) {
+        if (p >= 1f || p - last >= 0.005f) {
+            last = p
+            onChange(p)
         }
     }
 }

@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -114,6 +115,7 @@ fun GroupPage(lib: Library, groupId: String, onBack: () -> Unit, onSection: (Str
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var creating by remember { mutableStateOf(false) }
+    val folded = remember { mutableStateMapOf<String, Boolean>() }
     val loose = g.notesIn("")
     PageScaffold(
         g.name, "${g.sections.size} قسم · ${g.notes.size} تسجيل", onBack,
@@ -145,7 +147,7 @@ fun GroupPage(lib: Library, groupId: String, onBack: () -> Unit, onSection: (Str
         }
         if (loose.isNotEmpty()) {
             item { SectionTitle("من غير قسم", subtitle = "${loose.size} تسجيل", modifier = Modifier.padding(top = 6.dp)) }
-            notesByDay(loose, onOpen)
+            notesByDay(loose, folded, onOpen)
         }
     }
     if (creating) {
@@ -174,6 +176,7 @@ fun SectionPage(lib: Library, groupId: String, sectionId: String, onBack: () -> 
     val g = lib.group(groupId) ?: return GoBack(onBack)
     val s = g.section(sectionId) ?: return GoBack(onBack)
     val notes = g.notesIn(sectionId)
+    val folded = remember { mutableStateMapOf<String, Boolean>() }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     PageScaffold(
@@ -189,7 +192,7 @@ fun SectionPage(lib: Library, groupId: String, sectionId: String, onBack: () -> 
         } else {
             item { PdfButtons("${g.name} - ${s.name}", "${g.name} · ${s.name}") { notes.sortedBy { it.created }.map { PdfExport.Entry(it, s.name) } } }
         }
-        notesByDay(notes, onOpen)
+        notesByDay(notes, folded, onOpen)
     }
     if (renaming) {
         NameDialog("تغيير اسم القسم", "اسم القسم", s.name, onDismiss = { renaming = false }) {
@@ -352,13 +355,20 @@ private fun PdfButtons(fileName: String, docTitle: String, entries: () -> List<P
     }
 }
 
-/** One section per day, newest day first. */
-private fun LazyListScope.notesByDay(notes: List<Note>, onOpen: (Note) -> Unit) {
+/** One section per day, newest day first. Tapping a day folds its recordings away. */
+private fun LazyListScope.notesByDay(notes: List<Note>, folded: MutableMap<String, Boolean>, onOpen: (Note) -> Unit) {
     notes.groupBy { dayKey(it.created) }.forEach { (key, dayNotes) ->
+        val open = folded[key] != true
         item(key = "day-$key") {
-            SectionTitle(dayLabel(dayNotes.first().created), subtitle = fullDate(dayNotes.first().created), modifier = Modifier.padding(top = 6.dp))
+            Column(Modifier.padding(top = 6.dp)) {
+                CollapseHeader(
+                    dayLabel(dayNotes.first().created),
+                    fullDate(dayNotes.first().created) + if (open) "" else " · ${dayNotes.size} تسجيل",
+                    open,
+                ) { folded[key] = open }
+            }
         }
-        items(dayNotes, key = { it.id }) { n -> NoteRow(n) { onOpen(n) } }
+        if (open) items(dayNotes, key = { it.id }) { n -> NoteRow(n) { onOpen(n) } }
     }
 }
 
@@ -511,6 +521,7 @@ private fun PageScaffold(
     content: LazyListScope.() -> Unit,
 ) {
     androidx.activity.compose.BackHandler(onBack = onBack)
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
     GlassBackdrop {
         Column(Modifier.fillMaxSize()) {
             TopBar(
@@ -519,6 +530,7 @@ private fun PageScaffold(
                 actions = actions,
             )
             LazyColumn(
+                state = list,
                 modifier = Modifier.fillMaxSize().navigationBarsPadding(),
                 // Room for the floating bottom bar.
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
@@ -526,6 +538,7 @@ private fun PageScaffold(
                 content = content,
             )
         }
+        JumpTo(list, Modifier.align(Alignment.BottomEnd))
     }
 }
 

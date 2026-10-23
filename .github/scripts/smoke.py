@@ -94,4 +94,16 @@ adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
 time.sleep(3)
 print("screen after 60s:", screen_text())
 shot("screen-downloading.png")
+
+# Same screen in dark mode: the app follows the phone's theme.
+adb("shell", "cmd", "uimode", "night", "yes", check=False)
+time.sleep(4)
+adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
+time.sleep(4)
+shot("screen-dark.png")
+report = crashed()
+if report or not alive():
+    print("::error::App crashed after switching to dark mode")
+    print(report or adb("logcat", "-d", "-t", "300", check=False))
+    sys.exit(1)
 print("Smoke test passed: no crash, process alive")
