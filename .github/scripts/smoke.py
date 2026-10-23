@@ -54,6 +54,23 @@ def shot(name):
         f.write(subprocess.run(["adb", "exec-out", "screencap", "-p"], capture_output=True).stdout)
 
 
+def dismiss_system_anr():
+    """A slow emulator often shows "<system app> isn't responding" over everything: wait it out."""
+    for _ in range(5):
+        found = False
+        for text, (x, y) in nodes():
+            if text in ("Wait", "انتظار"):
+                print("dismissing system ANR dialog")
+                adb("shell", "input", "tap", str(x), str(y))
+                found = True
+                break
+        if not found:
+            return
+        time.sleep(3)
+        adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
+        time.sleep(3)
+
+
 def crashed():
     log = adb("logcat", "-d", "-b", "crash", check=False)
     return log if PKG in log else ""
@@ -72,6 +89,7 @@ adb("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS", check=
 adb("logcat", "-c", "-b", "all", check=False)
 adb("shell", "am", "start", "-W", "-n", f"{PKG}/.MainActivity")
 time.sleep(6)
+dismiss_system_anr()
 print("screen:", screen_text())
 shot("screen-home.png")
 
