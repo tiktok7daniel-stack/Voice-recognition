@@ -42,8 +42,10 @@ object PdfExport {
             w.block(n.title, paint(16f, bold = true), after = 2f)
             val meta = listOfNotNull(e.section.ifBlank { null }, "${date(n.created)} ${time(n.created)}", n.source.ifBlank { null })
             w.block(meta.joinToString(" · "), paint(9.5f, color = Color.GRAY), after = 10f)
-            w.block("النص", paint(11f, bold = true, color = 0xFF7A4DFF.toInt()), after = 4f)
-            w.block(n.text.ifBlank { "—" }, paint(11.5f), ltr = true, after = 12f)
+            // Transcripts are Italian (left-to-right); the user's own notes can be anything.
+            val written = n.source.isBlank()
+            w.block(if (written) "ملاحظة" else "النص", paint(11f, bold = true, color = 0xFFE8640F.toInt()), after = 4f)
+            w.block(n.text.ifBlank { "—" }, paint(11.5f), ltr = !written, after = 12f)
             if (n.summary.isNotBlank()) {
                 w.block("الملخص والمختصرات", paint(11f, bold = true, color = 0xFFE07B00.toInt()), after = 4f)
                 w.block(n.summary, paint(11.5f), after = 12f)

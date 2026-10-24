@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Inbox
@@ -134,7 +135,14 @@ fun GroupPage(lib: Library, groupId: String, onBack: () -> Unit, onSection: (Str
                 }
             }
         }
-        item { NeonButton("قسم جديد", Modifier.fillMaxWidth(), Icons.Rounded.CreateNewFolder) { creating = true } }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NeonButton("اكتب ملاحظة", Modifier.weight(1f), Icons.Rounded.EditNote) {
+                    lib.addNote(g.id, "", newNoteTitle(), "", "")?.let(onOpen)
+                }
+                GhostButton("قسم جديد", Modifier.weight(1f), Icons.Rounded.CreateNewFolder) { creating = true }
+            }
+        }
         items(g.sections, key = { it.id }) { s ->
             val notes = g.notesIn(s.id)
             FolderRow(
@@ -187,8 +195,13 @@ fun SectionPage(lib: Library, groupId: String, sectionId: String, onBack: () -> 
             IconOrb(Icons.Rounded.Delete, onClick = { deleting = true })
         },
     ) {
+        item {
+            NeonButton("اكتب ملاحظة في الدرس ده", Modifier.fillMaxWidth(), Icons.Rounded.EditNote) {
+                lib.addNote(g.id, s.id, newNoteTitle(), "", "")?.let(onOpen)
+            }
+        }
         if (notes.isEmpty()) {
-            item { EmptyHint("القسم فاضي", "بعد ما تستخرج الكلام دوس \"حفظ في مجموعة\" واختار \"${g.name}\" ثم \"${s.name}\"") }
+            item { EmptyHint("القسم فاضي", "اكتب ملاحظة، أو بعد ما تستخرج الكلام من فويس دوس \"حطه في مجموعة\" واختار \"${s.name}\"") }
         } else {
             item { PdfButtons("${g.name} - ${s.name}", "${g.name} · ${s.name}") { notes.sortedBy { it.created }.map { PdfExport.Entry(it, s.name) } } }
         }
@@ -234,9 +247,15 @@ fun NotePage(lib: Library, groupId: String, noteId: String, onBack: () -> Unit, 
                 Modifier.fillMaxWidth().glass(NoteShape, accent = true, alpha = 0.45f).padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                SectionTitle("النص", subtitle = n.source.ifBlank { null })
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Editor(text, { text = it }, ltr = true, minHeight = 180)
+                if (n.source.isBlank()) {
+                    // A note the user writes: any language, any length; direction follows the text.
+                    SectionTitle("الكلام", subtitle = "اكتب أو الصق اللي انت عاوزه — بيطلع في الـ PDF")
+                    Editor(text, { text = it }, ltr = false, minHeight = 260, placeholder = "اكتب هنا…")
+                } else {
+                    SectionTitle("النص", subtitle = n.source)
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Editor(text, { text = it }, ltr = true, minHeight = 180)
+                    }
                 }
                 SectionTitle("الملخص والمختصرات", subtitle = "اكتب اللي عاوز تذاكره من التسجيل ده")
                 Editor(summary, { summary = it }, ltr = false, minHeight = 120, placeholder = "مثلاً: أهم النقط، الكلمات الجديدة، أسئلة…")
@@ -384,7 +403,7 @@ private fun NoteRow(n: Note, onClick: () -> Unit) {
         }
         Text(
             n.text.ifBlank { "(فاضي)" },
-            style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
+            style = MaterialTheme.typography.bodySmall.copy(textDirection = if (n.source.isBlank()) TextDirection.Content else TextDirection.Ltr),
             color = Ink.copy(alpha = 0.65f), maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
         if (n.summary.isNotBlank()) {
@@ -406,7 +425,8 @@ private fun FolderRow(icon: ImageVector, color: Color, title: String, detail: St
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(detail, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // The RTL mark keeps a leading number ("3 قسم") at the start of the Arabic line.
+            Text(rtl(detail), style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -547,6 +567,8 @@ private fun PageScaffold(
 private fun GoBack(onBack: () -> Unit) {
     LaunchedEffect(Unit) { onBack() }
 }
+
+private fun newNoteTitle() = "ملاحظة " + SimpleDateFormat("d MMM · h:mm a", Arabic).format(Date())
 
 private fun dayKey(t: Long): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t))
 

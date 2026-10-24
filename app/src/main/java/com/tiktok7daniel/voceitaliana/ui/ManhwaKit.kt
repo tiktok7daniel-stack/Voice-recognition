@@ -51,6 +51,9 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun accentBrush(): Brush = Brush.horizontalGradient(listOf(Mono.Black, Mono.Black))
 
+/** Starts with a right-to-left mark so a leading number ("3 قسم") stays at the start of an Arabic line. */
+fun rtl(text: String) = "\u200F" + text
+
 /** Readable icon/text colour on top of [bg]. */
 private fun onColor(bg: Color) = if (bg.luminance() > 0.45f) Color(0xFF141416) else Color.White
 
@@ -143,7 +146,7 @@ fun TopBar(title: String, subtitle: String? = null, leading: @Composable () -> U
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) {
-                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(rtl(subtitle), style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         actions()
@@ -187,7 +190,7 @@ fun SectionTitle(title: String, subtitle: String? = null, modifier: Modifier = M
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) {
-                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(rtl(subtitle), style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         trailing()
@@ -209,7 +212,7 @@ fun CollapseHeader(title: String, subtitle: String?, expanded: Boolean, eyebrow:
             }
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) {
-                Text(subtitle, style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(rtl(subtitle), style = MaterialTheme.typography.labelMedium, color = Ink.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Box(
